@@ -1,24 +1,88 @@
-# GitLab CI/CD Pipeline für ÖWA Reporter
-# ========================================
-# Diese Pipeline deaktiviert Auto DevOps und externe Integrationen
+# ÖWA Reporter - GitLab CI/CD Pipeline
+# =====================================
+# Triggered by Airtable Automations
 
 stages:
-  - test
+  - ingest
+  - report
 
-# Einfacher Test-Job der immer erfolgreich ist
-test:
-  stage: test
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # Environment Variables werden in GitLab CI/CD Settings definiert
+
+# Cache für schnellere Builds
+cache:
+  paths:
+    - .cache/pip/
+    - venv/
+
+# =============================================================================
+# DAILY INGESTION - Täglich um 08:00 UTC (getriggert von Airtable)
+# =============================================================================
+daily_ingest:
+  stage: ingest
+  image: python:3.11-slim
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install requests python-dotenv openai
+  script:
+    - echo "🚀 Starting Daily Ingestion..."
+    - python scripts/daily_ingest.py
+    - echo "✅ Daily Ingestion completed!"
+  rules:
+    - if: $TRIGGER_TYPE == "daily"
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $TRIGGER_TYPE == "daily"
+
+# =============================================================================
+# WEEKLY REPORT - Montag 09:00 UTC (getriggert von Airtable)
+# =============================================================================
+weekly_report:
+  stage: report
+  image: python:3.11-slim
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install requests python-dotenv openai
+  script:
+    - echo "📊 Generating Weekly Report..."
+    - python scripts/weekly_report.py
+    - echo "✅ Weekly Report sent!"
+  rules:
+    - if: $TRIGGER_TYPE == "weekly"
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $TRIGGER_TYPE == "weekly"
+
+# =============================================================================
+# MONTHLY REPORT - 1. des Monats 10:00 UTC (getriggert von Airtable)
+# =============================================================================
+monthly_report:
+  stage: report
+  image: python:3.11-slim
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install requests python-dotenv openai
+  script:
+    - echo "📈 Generating Monthly Report..."
+    - python scripts/monthly_report.py
+    - echo "✅ Monthly Report sent!"
+  rules:
+    - if: $TRIGGER_TYPE == "monthly"
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $TRIGGER_TYPE == "monthly"
+
+# =============================================================================
+# TEST JOB - Für manuelle Tests
+# =============================================================================
+test_pipeline:
+  stage: ingest
   image: python:3.11-slim
   script:
-    - echo "✅ ÖWA Reporter - Pipeline OK"
-    - echo "📦 Version 1.1.0"
-    - echo "🔐 Security CRON_SECRET enabled"
+    - echo "🧪 Test Pipeline triggered successfully!"
+    - echo "TRIGGER_TYPE = $TRIGGER_TYPE"
     - python --version
-  only:
-    - main
-    - develop
-
-# Verhindert Auto DevOps
-variables:
-  AUTO_DEVOPS_ENABLED: "false"
-
+  rules:
+    - if: $TRIGGER_TYPE == "test"
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $TRIGGER_TYPE == "test"
