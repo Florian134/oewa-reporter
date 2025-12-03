@@ -1,15 +1,15 @@
 """
-Daily Cron Job - Tägliche Daten-Ingestion (Lite Version)
+Daily Cron Job - Tägliche Daten-Ingestion (Airtable Version)
 
 Ausführung: Täglich um 08:00 UTC via Vercel Cron
 
-Diese Version verwendet KEINE schweren Pakete (pandas, numpy).
-Datenverarbeitung erfolgt mit reinem Python + SQLAlchemy.
+Diese Version speichert Daten direkt in Airtable.
 """
 from http.server import BaseHTTPRequestHandler
 import json
 import os
 import sys
+import hmac
 from datetime import date, datetime, timedelta
 
 # Projekt-Root zum Path hinzufügen
@@ -48,8 +48,6 @@ class handler(BaseHTTPRequestHandler):
     
     def _verify_auth(self) -> bool:
         """Prüft CRON_SECRET Authentication"""
-        import hmac
-        
         cron_secret = os.getenv("CRON_SECRET", "")
         
         # Dev-Mode: Kein Secret = durchlassen mit Warnung
@@ -82,23 +80,22 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b'{"error": "Unauthorized", "message": "Valid CRON_SECRET required"}')
         return False
-    
+
     def _run_daily_ingestion(self):
-        """Führt die tägliche Ingestion durch (ohne pandas)"""
+        """Führt die tägliche Ingestion durch und speichert in Airtable"""
         import requests
-        from sqlalchemy import create_engine, text
-        from sqlalchemy.orm import sessionmaker
         
         # Config laden
         api_key = os.getenv("INFONLINE_API_KEY", "")
-        db_url = os.getenv("DATABASE_URL", "")
+        airtable_key = os.getenv("AIRTABLE_API_KEY", "")
+        airtable_base = os.getenv("AIRTABLE_BASE_ID", "appj6S8TQHMlKyahg")
         teams_webhook = os.getenv("TEAMS_WEBHOOK_URL", "")
         
         if not api_key:
             return {"status": "error", "error": "INFONLINE_API_KEY nicht gesetzt"}
         
-        if not db_url:
-            return {"status": "error", "error": "DATABASE_URL nicht gesetzt"}
+        if not airtable_key:
+            return {"status": "error", "error": "AIRTABLE_API_KEY nicht gesetzt"}
         
         target_date = date.today() - timedelta(days=1)
         
@@ -112,80 +109,98 @@ class handler(BaseHTTPRequestHandler):
         
         # Sites und Metriken
         sites = [
-            {"name": "VOL Web Desktop", "site_id": "EA000004_desktop", "brand": "vol", "surface": "web_desktop"},
-            {"name": "VOL Web Mobile", "site_id": "EA000004_mobile", "brand": "vol", "surface": "web_mobile"},
-            {"name": "VOL App", "site_id": "SB000074", "brand": "vol", "surface": "app"},
+            {"name": "VOL Web Desktop", "site_id": "EA000004_desktop", "brand": "VOL", "surface": "Web Desktop"},
+            {"name": "VOL Web Mobile", "site_id": "EA000004_mobile", "brand": "VOL", "surface": "Web Mobile"},
+            {"name": "VOL App", "site_id": "SB000074", "brand": "VOL", "surface": "App"},
         ]
-        metrics = ["pageimpressions", "visits"]
+        metrics_map = {
+            "pageimpressions": "Page Impressions",
+            "visits": "Visits"
+        }
         
-        # API Session
-        session = requests.Session()
-        session.headers.update({
+        # API Session für INFOnline
+        api_session = requests.Session()
+        api_session.headers.update({
             "authorization": api_key,
             "Accept": "application/json"
         })
         
-        # DB Connection
-        engine = create_engine(db_url)
-        Session = sessionmaker(bind=engine)
-        db_session = Session()
+        # Airtable Session
+        airtable_session = requests.Session()
+        airtable_session.headers.update({
+            "Authorization": f"Bearer {airtable_key}",
+            "Content-Type": "application/json"
+        })
+        airtable_url = f"https://api.airtable.com/v0/{airtable_base}/Measurements"
         
-        try:
-            for site in sites:
-                for metric in metrics:
-                    try:
-                        # API Call
-                        url = f"https://reportingapi.infonline.de/api/v1/{metric}"
-                        params = {
-                            "site": site["site_id"],
-                            "date": target_date.isoformat(),
-                            "aggregation": "DAY"
-                        }
+        records_to_create = []
+        
+        for site in sites:
+            for metric_key, metric_name in metrics_map.items():
+                try:
+                    # API Call zu INFOnline
+                    url = f"https://reportingapi.infonline.de/api/v1/{metric_key}"
+                    params = {
+                        "site": site["site_id"],
+                        "date": target_date.isoformat(),
+                        "aggregation": "DAY"
+                    }
+                    
+                    response = api_session.get(url, params=params, timeout=30)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
                         
-                        response = session.get(url, params=params, timeout=30)
+                        # Wert extrahieren
+                        iom_total = None
+                        preliminary = True
                         
-                        if response.status_code == 200:
-                            data = response.json()
+                        if isinstance(data, list) and len(data) > 0:
+                            day_data = data[0]
+                            if "iom" in day_data:
+                                iom_total = day_data["iom"].get("total")
+                                preliminary = day_data.get("preliminary", True)
+                        
+                        if iom_total is not None:
+                            # Airtable Record vorbereiten
+                            unique_key = f"{target_date.isoformat()}_{site['brand']}_{site['surface']}_{metric_name}"
                             
-                            # Wert extrahieren
-                            iom_total = None
-                            if isinstance(data, list) and len(data) > 0:
-                                day_data = data[0]
-                                if "iom" in day_data:
-                                    iom_total = day_data["iom"].get("total")
+                            records_to_create.append({
+                                "fields": {
+                                    "Datum": target_date.isoformat(),
+                                    "Brand": site["brand"],
+                                    "Plattform": site["surface"],
+                                    "Metrik": metric_name,
+                                    "Wert": iom_total,
+                                    "Site ID": site["site_id"],
+                                    "Vorläufig": preliminary,
+                                    "Erfasst am": datetime.utcnow().isoformat(),
+                                    "Unique Key": unique_key
+                                }
+                            })
                             
-                            if iom_total is not None:
-                                # In DB speichern (UPSERT)
-                                sql = text("""
-                                    INSERT INTO measurements 
-                                    (brand, surface, metric, date, site_id, value_total, preliminary, ingested_at)
-                                    VALUES (:brand, :surface, :metric, :date, :site_id, :value_total, :preliminary, :ingested_at)
-                                    ON CONFLICT (brand, surface, metric, date, site_id, preliminary) 
-                                    DO UPDATE SET value_total = :value_total, updated_at = :ingested_at
-                                """)
-                                
-                                db_session.execute(sql, {
-                                    "brand": site["brand"],
-                                    "surface": site["surface"],
-                                    "metric": metric,
-                                    "date": target_date,
-                                    "site_id": site["site_id"],
-                                    "value_total": iom_total,
-                                    "preliminary": True,
-                                    "ingested_at": datetime.utcnow()
-                                })
-                                
-                                result["ingested"] += 1
-                        else:
-                            result["errors"].append(f"{site['name']}/{metric}: HTTP {response.status_code}")
-                            
-                    except Exception as e:
-                        result["errors"].append(f"{site['name']}/{metric}: {str(e)}")
-            
-            db_session.commit()
-            
-        finally:
-            db_session.close()
+                            result["ingested"] += 1
+                    else:
+                        result["errors"].append(f"{site['name']}/{metric_key}: HTTP {response.status_code}")
+                        
+                except Exception as e:
+                    result["errors"].append(f"{site['name']}/{metric_key}: {str(e)}")
+        
+        # Batch-Insert in Airtable (max 10 pro Request)
+        for i in range(0, len(records_to_create), 10):
+            batch = records_to_create[i:i+10]
+            try:
+                airtable_response = airtable_session.post(
+                    airtable_url,
+                    json={"records": batch},
+                    timeout=30
+                )
+                
+                if airtable_response.status_code not in (200, 201):
+                    result["errors"].append(f"Airtable Batch {i//10 + 1}: {airtable_response.text[:100]}")
+                    
+            except Exception as e:
+                result["errors"].append(f"Airtable Batch {i//10 + 1}: {str(e)}")
         
         # Teams Notification
         if teams_webhook and result["ingested"] > 0:
@@ -206,12 +221,12 @@ class handler(BaseHTTPRequestHandler):
             "summary": f"ÖWA Daily Ingestion: {target_date}",
             "themeColor": "28A745" if result["status"] == "success" else "FFC107",
             "sections": [{
-                "activityTitle": f"📥 ÖWA Tägliche Ingestion",
+                "activityTitle": f"📥 ÖWA Tägliche Ingestion → Airtable",
                 "activitySubtitle": target_date.strftime("%d.%m.%Y"),
                 "facts": [
                     {"name": "Status", "value": "✅ Erfolgreich" if result["status"] == "success" else "⚠️ Teilweise"},
                     {"name": "Datensätze", "value": str(result["ingested"])},
-                    {"name": "Fehler", "value": str(len(result["errors"]))},
+                    {"name": "Ziel", "value": "Airtable"},
                 ],
                 "markdown": True
             }]
@@ -223,4 +238,4 @@ class handler(BaseHTTPRequestHandler):
         try:
             requests.post(webhook_url, json=card, timeout=10)
         except:
-            pass  # Ignore notification errors
+            pass
