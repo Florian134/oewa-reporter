@@ -23,7 +23,7 @@ daily_ingest:
     - echo "🚀 ÖWA Reporter - Daily Ingestion"
     - pip install --upgrade pip
     - pip install requests python-dotenv openai
-    - python scripts/daily_ingest.py
+    - python ci_scripts/daily_ingest.py
     - echo "✅ Daily Ingestion completed!"
   rules:
     - if: $CI_PIPELINE_SOURCE == "trigger"
