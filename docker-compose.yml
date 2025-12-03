@@ -1,0 +1,88 @@
+# ÖWA Reporting System - Docker Compose
+# ======================================
+
+version: '3.8'
+
+services:
+  # PostgreSQL Datenbank
+  db:
+    image: postgres:15-alpine
+    container_name: oewa_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oewa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oewa_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-oewa_reporting}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oewa}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ÖWA Reporting Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oewa_reporting
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - INFONLINE_API_KEY=${INFONLINE_API_KEY}
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-oewa}:${POSTGRES_PASSWORD:-oewa_secret}@db:5432/${POSTGRES_DB:-oewa_reporting}
+      - TEAMS_WEBHOOK_URL=${TEAMS_WEBHOOK_URL:-}
+      - TEAMS_ENABLED=${TEAMS_ENABLED:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+    # Standard: CLI Help anzeigen
+    # Für tägliche Ingestion: command: ["ingest_daily"]
+    command: ["check"]
+
+  # Cronjob Runner (optional)
+  cron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oewa_cron
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - INFONLINE_API_KEY=${INFONLINE_API_KEY}
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-oewa}:${POSTGRES_PASSWORD:-oewa_secret}@db:5432/${POSTGRES_DB:-oewa_reporting}
+      - TEAMS_WEBHOOK_URL=${TEAMS_WEBHOOK_URL:-}
+      - TEAMS_ENABLED=${TEAMS_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "ÖWA Reporting Cron gestartet"
+        # Initiale DB-Migration
+        python -m oewa_reporting init_db
+        # Täglich um 8:00 Uhr (UTC) ausführen
+        while true; do
+          CURRENT_HOUR=$(date +%H)
+          CURRENT_MIN=$(date +%M)
+          if [ "$$CURRENT_HOUR" = "06" ] && [ "$$CURRENT_MIN" = "00" ]; then
+            echo "Starte tägliche Ingestion..."
+            python -m oewa_reporting ingest_daily
+            sleep 60  # Verhindere doppelte Ausführung
+          fi
+          sleep 30
+        done
+    profiles:
+      - cron
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: oewa_network
+

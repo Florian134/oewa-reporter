@@ -1,0 +1,35 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "name": "oewa-reporter",
+  "builds": [
+    {
+      "src": "api/**/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/weekly",
+      "schedule": "0 9 * * 1"
+    },
+    {
+      "path": "/api/cron/monthly",
+      "schedule": "0 10 1 * *"
+    }
+  ],
+  "env": {
+    "PYTHONPATH": "."
+  }
+}
+
