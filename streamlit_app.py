@@ -263,8 +263,7 @@ with tab1:
                 title="Page Impressions nach Brand",
                 color_discrete_map={"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
             )
-            fig_pi.update_layout(showlegend=False)
-            fig_pi.update_yaxis(tickformat=",")
+            fig_pi.update_layout(showlegend=False, yaxis=dict(tickformat=","))
             st.plotly_chart(fig_pi, use_container_width=True)
         else:
             st.info("Keine Page Impressions Daten für den ausgewählten Zeitraum.")
@@ -280,8 +279,7 @@ with tab1:
                 title="Visits nach Brand",
                 color_discrete_map={"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
             )
-            fig_visits.update_layout(showlegend=False)
-            fig_visits.update_yaxis(tickformat=",")
+            fig_visits.update_layout(showlegend=False, yaxis=dict(tickformat=","))
             st.plotly_chart(fig_visits, use_container_width=True)
         else:
             st.info("Keine Visits Daten für den ausgewählten Zeitraum.")
@@ -300,7 +298,7 @@ with tab1:
             title="Tägliche Entwicklung",
             color_discrete_map={"Page Impressions": "#3B82F6", "Visits": "#F97316"}
         )
-        fig_trend.update_yaxis(tickformat=",")
+        fig_trend.update_layout(yaxis=dict(tickformat=","))
         st.plotly_chart(fig_trend, use_container_width=True)
     else:
         st.info("Keine Daten für den ausgewählten Zeitraum.")
