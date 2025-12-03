@@ -16,7 +16,9 @@ class handler(BaseHTTPRequestHandler):
             "status": "healthy",
             "service": "oewa-reporter",
             "timestamp": datetime.utcnow().isoformat(),
-            "version": "1.0.0"
+            "version": "1.1.0",
+            "security": "CRON_SECRET enabled",
+            "deployment_test": "2024-12-03T11:30"
         }
         
         self.wfile.write(json.dumps(response).encode())
