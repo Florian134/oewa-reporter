@@ -14,31 +14,18 @@ cache:
     - .cache/pip/
 
 # =============================================================================
-# MAIN JOB - Führt das passende Script basierend auf JOB_TYPE aus
+# DAILY INGESTION - Standard Job (wird bei jedem Trigger ausgeführt)
 # =============================================================================
-run_job:
+daily_ingest:
   stage: run
   image: python:3.11-slim
-  before_script:
+  script:
+    - echo "🚀 ÖWA Reporter - Daily Ingestion"
     - pip install --upgrade pip
     - pip install requests python-dotenv openai
-  script:
-    - echo "🚀 ÖWA Reporter Pipeline"
-    - echo "Job Type: ${JOB_TYPE:-daily}"
-    - |
-      if [ "${JOB_TYPE}" = "weekly" ]; then
-        echo "📊 Running Weekly Report..."
-        python scripts/weekly_report.py
-      elif [ "${JOB_TYPE}" = "monthly" ]; then
-        echo "📈 Running Monthly Report..."
-        python scripts/monthly_report.py
-      else
-        echo "📥 Running Daily Ingestion..."
-        python scripts/daily_ingest.py
-      fi
-    - echo "✅ Job completed!"
+    - python scripts/daily_ingest.py
+    - echo "✅ Daily Ingestion completed!"
   rules:
-    # Nur bei Trigger oder Schedule ausführen
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
-    - if: $CI_PIPELINE_SOURCE == "web"  # Manuell aus GitLab UI
+    - if: $CI_PIPELINE_SOURCE == "web"
