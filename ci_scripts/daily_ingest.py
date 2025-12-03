@@ -150,15 +150,19 @@ def main():
             if result["success"]:
                 data = result["data"]
                 
-                # Wert extrahieren
+                # Wert extrahieren - Format: {"metadata": {...}, "data": {"iom": [{"pis/visits": 123}]}}
                 iom_total = None
                 preliminary = True
                 
-                if isinstance(data, list) and len(data) > 0:
-                    day_data = data[0]
-                    if "iom" in day_data:
-                        iom_total = day_data["iom"].get("total")
-                        preliminary = day_data.get("preliminary", True)
+                # Feldname basiert auf Metrik
+                value_field = "pis" if metric_key == "pageimpressions" else "visits"
+                
+                if isinstance(data, dict) and "data" in data:
+                    api_data = data["data"]
+                    if "iom" in api_data and len(api_data["iom"]) > 0:
+                        iom_entry = api_data["iom"][0]
+                        iom_total = iom_entry.get(value_field)
+                        preliminary = iom_entry.get("preliminary", True)
                 
                 if iom_total is not None:
                     metric_name = METRICS_MAP.get(metric_key, metric_key)
