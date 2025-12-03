@@ -79,3 +79,19 @@ alert_check:
     - echo "✅ Alert Check completed!"
   rules:
     - if: $JOB_TYPE == "alert_check"
+
+# =============================================================================
+# NOTIFICATION TEST - Testet alle Teams + GPT Funktionen
+# Triggern mit JOB_TYPE=test_notifications
+# =============================================================================
+test_notifications:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "🧪 ÖWA Reporter - Notification Tests"
+    - pip install --upgrade pip
+    - pip install requests
+    - python ci_scripts/test_all_notifications.py --all
+    - echo "✅ Notification Tests completed!"
+  rules:
+    - if: $JOB_TYPE == "test_notifications"
