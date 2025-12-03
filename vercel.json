@@ -2,22 +2,16 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "name": "oewa-reporter",
-  "installCommand": "pip install -r api/requirements.txt",
-  "builds": [
-    {
-      "src": "api/**/*.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": null,
+  "installCommand": "pip install requests sqlalchemy psycopg2-binary python-dotenv openai",
+  "functions": {
+    "api/**/*.py": {
+      "runtime": "python3.12",
+      "maxDuration": 60
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    }
-  ],
+  },
   "crons": [
     {
       "path": "/api/cron/daily",
@@ -31,11 +25,5 @@
       "path": "/api/cron/monthly",
       "schedule": "0 10 1 * *"
     }
-  ],
-  "functions": {
-    "api/**/*.py": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  }
+  ]
 }
