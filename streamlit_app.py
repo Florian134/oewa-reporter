@@ -253,46 +253,57 @@ with tab1:
     col1, col2 = st.columns(2)
     
     with col1:
-        fig_pi = px.bar(
-            brand_summary[brand_summary["metrik"] == "Page Impressions"],
-            x="brand",
-            y="wert",
-            color="brand",
-            title="Page Impressions nach Brand",
-            color_discrete_map={"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
-        )
-        fig_pi.update_layout(showlegend=False)
-        fig_pi.update_yaxis(tickformat=",.0f")
-        st.plotly_chart(fig_pi, use_container_width=True)
+        pi_data = brand_summary[brand_summary["metrik"] == "Page Impressions"]
+        if not pi_data.empty:
+            fig_pi = px.bar(
+                pi_data,
+                x="brand",
+                y="wert",
+                color="brand",
+                title="Page Impressions nach Brand",
+                color_discrete_map={"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
+            )
+            fig_pi.update_layout(showlegend=False)
+            fig_pi.update_yaxis(tickformat=",")
+            st.plotly_chart(fig_pi, use_container_width=True)
+        else:
+            st.info("Keine Page Impressions Daten für den ausgewählten Zeitraum.")
     
     with col2:
-        fig_visits = px.bar(
-            brand_summary[brand_summary["metrik"] == "Visits"],
-            x="brand",
-            y="wert",
-            color="brand",
-            title="Visits nach Brand",
-            color_discrete_map={"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
-        )
-        fig_visits.update_layout(showlegend=False)
-        fig_visits.update_yaxis(tickformat=",.0f")
-        st.plotly_chart(fig_visits, use_container_width=True)
+        visits_data = brand_summary[brand_summary["metrik"] == "Visits"]
+        if not visits_data.empty:
+            fig_visits = px.bar(
+                visits_data,
+                x="brand",
+                y="wert",
+                color="brand",
+                title="Visits nach Brand",
+                color_discrete_map={"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
+            )
+            fig_visits.update_layout(showlegend=False)
+            fig_visits.update_yaxis(tickformat=",")
+            st.plotly_chart(fig_visits, use_container_width=True)
+        else:
+            st.info("Keine Visits Daten für den ausgewählten Zeitraum.")
     
     # Daily trend
     st.subheader("📅 Täglicher Trend")
     
     daily = df_filtered.groupby(["datum", "metrik"])["wert"].sum().reset_index()
     
-    fig_trend = px.line(
-        daily,
-        x="datum",
-        y="wert",
-        color="metrik",
-        title="Tägliche Entwicklung",
-        color_discrete_map={"Page Impressions": "#3B82F6", "Visits": "#F97316"}
-    )
-    fig_trend.update_yaxis(tickformat=",.0f")
-    st.plotly_chart(fig_trend, use_container_width=True)
+    if not daily.empty:
+        fig_trend = px.line(
+            daily,
+            x="datum",
+            y="wert",
+            color="metrik",
+            title="Tägliche Entwicklung",
+            color_discrete_map={"Page Impressions": "#3B82F6", "Visits": "#F97316"}
+        )
+        fig_trend.update_yaxis(tickformat=",")
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else:
+        st.info("Keine Daten für den ausgewählten Zeitraum.")
 
 # -----------------------------------------------------------------------------
 # TAB 2: DATENTABELLE
@@ -341,30 +352,39 @@ with tab3:
     # 7-day moving average
     daily = df_filtered.groupby(["datum", "metrik"])["wert"].sum().reset_index()
     
-    for metrik in ["Page Impressions", "Visits"]:
-        metric_data = daily[daily["metrik"] == metrik].sort_values("datum")
-        metric_data["7d_avg"] = metric_data["wert"].rolling(window=7, min_periods=1).mean()
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=metric_data["datum"],
-            y=metric_data["wert"],
-            mode="lines",
-            name="Tageswert",
-            line=dict(color="#93C5FD" if metrik == "Page Impressions" else "#FDBA74")
-        ))
-        fig.add_trace(go.Scatter(
-            x=metric_data["datum"],
-            y=metric_data["7d_avg"],
-            mode="lines",
-            name="7-Tage Ø",
-            line=dict(color="#2563EB" if metrik == "Page Impressions" else "#EA580C", width=3)
-        ))
-        fig.update_layout(
-            title=f"{metrik} - Trend mit 7-Tage-Durchschnitt",
-            yaxis_tickformat=",.0f"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    if daily.empty:
+        st.info("Keine Daten für den ausgewählten Zeitraum.")
+    else:
+        for metrik in ["Page Impressions", "Visits"]:
+            metric_data = daily[daily["metrik"] == metrik].sort_values("datum")
+            
+            if metric_data.empty:
+                st.info(f"Keine {metrik} Daten verfügbar.")
+                continue
+            
+            metric_data = metric_data.copy()
+            metric_data["7d_avg"] = metric_data["wert"].rolling(window=7, min_periods=1).mean()
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=metric_data["datum"],
+                y=metric_data["wert"],
+                mode="lines",
+                name="Tageswert",
+                line=dict(color="#93C5FD" if metrik == "Page Impressions" else "#FDBA74")
+            ))
+            fig.add_trace(go.Scatter(
+                x=metric_data["datum"],
+                y=metric_data["7d_avg"],
+                mode="lines",
+                name="7-Tage Ø",
+                line=dict(color="#2563EB" if metrik == "Page Impressions" else "#EA580C", width=3)
+            ))
+            fig.update_layout(
+                title=f"{metrik} - Trend mit 7-Tage-Durchschnitt",
+                yaxis_tickformat=","
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 # =============================================================================
 # FOOTER
