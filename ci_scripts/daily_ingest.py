@@ -25,12 +25,11 @@ AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
 
 # =============================================================================
-# SITES KONFIGURATION
+# SITES KONFIGURATION - Korrekte ÖWA Site-IDs
 # =============================================================================
 SITES = [
-    {"name": "VOL Web Desktop", "site_id": "EA000004_desktop", "brand": "VOL", "surface": "Web Desktop"},
-    {"name": "VOL Web Mobile", "site_id": "EA000004_mobile", "brand": "VOL", "surface": "Web Mobile"},
-    {"name": "VOL App", "site_id": "SB000074", "brand": "VOL", "surface": "App"},
+    {"name": "VOL.AT Web", "site_id": "at_w_atvol", "brand": "VOL", "surface": "Web"},
+    {"name": "VIENNA.AT Web", "site_id": "at_w_atvienna", "brand": "Vienna", "surface": "Web"},
 ]
 
 METRICS = ["pageimpressions", "visits"]
