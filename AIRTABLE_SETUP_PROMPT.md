@@ -138,5 +138,5 @@ Erstelle folgende Felder:
 ---
 
 ## 🔗 Airtable Base Link:
-https://airtable.com/appj6S8TQHMlKyahg
+https://airtable.com/appTIeod85xnBy7Vn
 
