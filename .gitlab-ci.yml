@@ -26,6 +26,40 @@ daily_ingest:
     - python ci_scripts/daily_ingest.py
     - echo "✅ Daily Ingestion completed!"
   rules:
+    - if: $JOB_TYPE == "backfill"
+      when: never
+    - if: $JOB_TYPE == "weekly"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
+
+# =============================================================================
+# BACKFILL - Historische Daten laden (manuell triggern mit JOB_TYPE=backfill)
+# =============================================================================
+backfill:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "🔄 ÖWA Reporter - Backfill"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - python ci_scripts/backfill.py --days ${BACKFILL_DAYS:-30}
+    - echo "✅ Backfill completed!"
+  rules:
+    - if: $JOB_TYPE == "backfill"
+
+# =============================================================================
+# WEEKLY REPORT - Wöchentlicher Bericht (manuell triggern mit JOB_TYPE=weekly)
+# =============================================================================
+weekly_report:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "📊 ÖWA Reporter - Weekly Report"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv openai
+    - python ci_scripts/weekly_report.py
+    - echo "✅ Weekly Report completed!"
+  rules:
+    - if: $JOB_TYPE == "weekly"
