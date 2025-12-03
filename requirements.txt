@@ -1,41 +1,11 @@
-# ÖWA Reporting System - Dependencies
-# =====================================
+# Vercel API - Minimal Dependencies
+# ==================================
+# Nur für Serverless Functions (< 50 MB)
+# Vollständige Dependencies: requirements-full.txt
 
-# HTTP Client
 requests>=2.28.0
-
-# Database
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
-
-# Data Processing
-pandas>=2.0.0
-numpy>=1.24.0
-
-# Configuration
 python-dotenv>=1.0.0
+openai>=1.0.0
 
-# CLI
-click>=8.1.0
-
-# Dashboard & Visualization
-streamlit>=1.28.0
-plotly>=5.18.0
-openpyxl>=3.1.0  # Excel Export
-
-# Testing
-pytest>=7.0.0
-pytest-cov>=4.0.0
-
-# OpenAI GPT Integration
-openai>=1.0.0  # Optional, für KI-Reports
-
-# Airtable Integration (optional)
-# pyairtable>=2.0.0  # Alternativ zu direkter API-Nutzung
-
-# Scheduling (für lokale Cron-Jobs)
-# apscheduler>=3.10.0
-
-# Production (Vercel)
-# uvicorn>=0.24.0
-# fastapi>=0.104.0
