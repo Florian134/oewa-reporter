@@ -2,13 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "name": "oewa-reporter",
-  "framework": null,
-  "buildCommand": null,
-  "outputDirectory": null,
   "installCommand": "pip install requests sqlalchemy psycopg2-binary python-dotenv openai",
   "functions": {
     "api/**/*.py": {
-      "runtime": "python3.12",
       "maxDuration": 60
     }
   },
