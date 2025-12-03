@@ -63,3 +63,19 @@ weekly_report:
     - echo "✅ Weekly Report completed!"
   rules:
     - if: $JOB_TYPE == "weekly"
+
+# =============================================================================
+# ALERT CHECK - Tägliche Schwellenwert-Prüfung mit GPT-Analyse
+# Triggern mit JOB_TYPE=alert_check
+# =============================================================================
+alert_check:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "🚨 ÖWA Reporter - Alert Check"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv openai
+    - python ci_scripts/alert_check.py
+    - echo "✅ Alert Check completed!"
+  rules:
+    - if: $JOB_TYPE == "alert_check"
