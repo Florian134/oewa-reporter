@@ -1,0 +1,69 @@
+# Vercel Ignore - Reduziert Bundle-Größe
+# =========================================
+
+# Virtual Environment
+venv/
+.venv/
+ENV/
+env/
+Scripts/
+Lib/
+Include/
+pyvenv.cfg
+
+# Archive & Backups
+archive/
+
+# Tests (nicht für Production)
+tests/
+*_test.py
+test_*.py
+pytest.ini
+
+# Jupyter
+share/
+etc/
+*.ipynb
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# Docs (optional für API)
+*.md
+!README.md
+
+# Development files
+run_full_test.py
+API-testing.py
+infonline_api_test/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Streamlit (wird auf Streamlit Cloud deployed)
+.streamlit/
+streamlit_app.py
+oewa_reporting/dashboard.py
+oewa_reporting/visualization.py
+
+# Full requirements (API hat eigene)
+requirements.txt
+
