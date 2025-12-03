@@ -15,6 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # 🔐 Authentication Check
+        if not self._verify_auth():
+            return
+        
         try:
             result = self._run_monthly_report()
             
@@ -37,6 +41,39 @@ class handler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         self.do_POST()
+    
+    def _verify_auth(self) -> bool:
+        """Prüft CRON_SECRET Authentication"""
+        import hmac
+        
+        cron_secret = os.getenv("CRON_SECRET", "")
+        
+        if not cron_secret:
+            if os.getenv("VERCEL_ENV") == "production":
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(b'{"error": "CRON_SECRET not configured in production"}')
+                return False
+            return True
+        
+        auth_header = self.headers.get("Authorization", "")
+        
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            if hmac.compare_digest(token, cron_secret):
+                return True
+        
+        vercel_signature = self.headers.get("x-vercel-signature", "")
+        if vercel_signature and hmac.compare_digest(vercel_signature, cron_secret):
+            return True
+        
+        self.send_response(401)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('WWW-Authenticate', 'Bearer realm="OEWA Cron API"')
+        self.end_headers()
+        self.wfile.write(b'{"error": "Unauthorized", "message": "Valid CRON_SECRET required"}')
+        return False
     
     def _run_monthly_report(self):
         """Generiert monatlichen KI-Report"""
