@@ -30,6 +30,8 @@ daily_ingest:
       when: never
     - if: $JOB_TYPE == "weekly"
       when: never
+    - if: $CI_COMMIT_REF_NAME == "weekly-trigger"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
