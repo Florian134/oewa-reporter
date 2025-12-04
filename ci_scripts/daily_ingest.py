@@ -62,15 +62,59 @@ def fetch_infonline_data(site_id: str, metric: str, target_date: date) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def save_to_airtable(records: list) -> dict:
-    """Speichert Records in Airtable"""
+def check_existing_records(target_date: date) -> set:
+    """Prüft welche Records für ein Datum bereits in Airtable existieren"""
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    
+    existing_keys = set()
+    
+    try:
+        # Alle Records für dieses Datum abrufen
+        params = {
+            "filterByFormula": f"{{Datum}} = '{target_date.isoformat()}'",
+            "fields[]": ["Unique Key"]
+        }
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            for record in data.get("records", []):
+                unique_key = record.get("fields", {}).get("Unique Key")
+                if unique_key:
+                    existing_keys.add(unique_key)
+            print(f"   → {len(existing_keys)} existierende Records für {target_date} gefunden")
+    except Exception as e:
+        print(f"   ⚠️ Fehler beim Prüfen existierender Records: {e}")
+    
+    return existing_keys
+
+
+def save_to_airtable(records: list, existing_keys: set = None) -> dict:
+    """Speichert Records in Airtable (überspringt Duplikate)"""
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    results = {"created": 0, "errors": []}
+    results = {"created": 0, "skipped": 0, "errors": []}
+    
+    # Duplikate filtern
+    if existing_keys:
+        new_records = []
+        for record in records:
+            unique_key = record.get("fields", {}).get("Unique Key")
+            if unique_key and unique_key in existing_keys:
+                results["skipped"] += 1
+                print(f"   ⏭️ Übersprungen (existiert): {unique_key}")
+            else:
+                new_records.append(record)
+        records = new_records
+    
+    if not records:
+        print("   ℹ️ Keine neuen Records zum Speichern")
+        return results
     
     # Batch-Insert (max 10 pro Request)
     for i in range(0, len(records), 10):
@@ -192,11 +236,17 @@ def main():
     print()
     print("=" * 60)
     
-    # In Airtable speichern
+    # Prüfen ob bereits Daten für dieses Datum existieren
+    print(f"🔍 Prüfe existierende Daten für {target_date}...")
+    existing_keys = check_existing_records(target_date)
+    
+    # In Airtable speichern (mit Duplikat-Prüfung)
     if records_to_create:
         print(f"💾 Speichere {len(records_to_create)} Datensätze in Airtable...")
-        save_result = save_to_airtable(records_to_create)
+        save_result = save_to_airtable(records_to_create, existing_keys)
         print(f"   ✅ Erstellt: {save_result['created']}")
+        if save_result.get("skipped", 0) > 0:
+            print(f"   ⏭️ Übersprungen (Duplikate): {save_result['skipped']}")
         if save_result["errors"]:
             for err in save_result["errors"]:
                 print(f"   ❌ {err}")
