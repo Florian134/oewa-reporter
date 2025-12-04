@@ -65,13 +65,6 @@ def create_weekday_chart(data: Dict, metric: str = "Page Impressions") -> Option
     if not PLOTLY_AVAILABLE:
         return None
     
-    try:
-        # Kaleido für PNG-Export importieren
-        import kaleido
-    except ImportError:
-        print("⚠️ Kaleido nicht verfügbar - keine PNG-Exports möglich")
-        return None
-    
     weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
     # Daten für das Chart vorbereiten
@@ -130,11 +123,6 @@ def create_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional
         PNG als bytes oder None wenn Plotly nicht verfügbar
     """
     if not PLOTLY_AVAILABLE:
-        return None
-    
-    try:
-        import kaleido
-    except ImportError:
         return None
     
     import pandas as pd
@@ -616,23 +604,27 @@ def run_weekly_report():
     if PLOTLY_AVAILABLE:
         print("\n📊 Erstelle Diagramme...")
         
-        # Wochentags-Analyse Chart
-        weekday_png = create_weekday_chart(chart_data, "Page Impressions")
-        if weekday_png:
-            print("   → Wochentags-Analyse erstellt")
-            url = upload_to_imgur(weekday_png)
-            if url:
-                image_urls["Wochentags-Analyse (PI)"] = url
-                print(f"   → Hochgeladen: {url[:50]}...")
-        
-        # Trend Chart
-        trend_png = create_trend_chart(chart_data, "Page Impressions")
-        if trend_png:
-            print("   → Trend-Diagramm erstellt")
-            url = upload_to_imgur(trend_png)
-            if url:
-                image_urls["7-Tage-Trend (PI)"] = url
-                print(f"   → Hochgeladen: {url[:50]}...")
+        try:
+            # Wochentags-Analyse Chart
+            weekday_png = create_weekday_chart(chart_data, "Page Impressions")
+            if weekday_png:
+                print("   → Wochentags-Analyse erstellt")
+                url = upload_to_imgur(weekday_png)
+                if url:
+                    image_urls["Wochentags-Analyse (PI)"] = url
+                    print(f"   → Hochgeladen: {url[:50]}...")
+            
+            # Trend Chart
+            trend_png = create_trend_chart(chart_data, "Page Impressions")
+            if trend_png:
+                print("   → Trend-Diagramm erstellt")
+                url = upload_to_imgur(trend_png)
+                if url:
+                    image_urls["7-Tage-Trend (PI)"] = url
+                    print(f"   → Hochgeladen: {url[:50]}...")
+        except Exception as e:
+            print(f"   ⚠️ Diagramm-Erstellung fehlgeschlagen: {e}")
+            print("   → Bericht wird ohne Diagramme gesendet")
     else:
         print("\n⚠️ Plotly nicht verfügbar - keine Diagramme erstellt")
     

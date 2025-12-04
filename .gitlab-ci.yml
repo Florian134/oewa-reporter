@@ -61,8 +61,8 @@ weekly_report:
   script:
     - echo "📊 ÖWA Reporter - Weekly Report"
     - pip install --upgrade pip
-    # Für Diagramme: plotly, kaleido, pandas
-    - pip install requests python-dotenv openai plotly kaleido pandas
+    # Für Diagramme: plotly, kaleido (0.2.1 hat eigenes Chromium), pandas
+    - pip install requests python-dotenv openai plotly "kaleido==0.2.1" pandas
     - python ci_scripts/weekly_report.py
     - echo "✅ Weekly Report completed!"
   rules:
