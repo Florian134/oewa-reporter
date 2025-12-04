@@ -429,8 +429,8 @@ with tab1:
         else:
             st.info("Keine Visits Daten für den ausgewählten Zeitraum.")
     
-    # Wochentags-Analyse (ersetzt irreführenden "Täglichen Trend")
-    st.subheader("📅 Wochentags-Analyse")
+    # Wochentags-Analyse nach Brand (VOL vs Vienna)
+    st.subheader("📅 Wochentags-Analyse nach Property")
     
     # Wochentag extrahieren (0=Montag, 6=Sonntag)
     df_weekday = df_filtered.copy()
@@ -444,9 +444,12 @@ with tab1:
     }
     df_weekday["wochentag_de"] = df_weekday["wochentag_name"].map(weekday_map)
     
-    # Durchschnitt pro Wochentag berechnen
-    weekday_avg = df_weekday.groupby(["wochentag", "wochentag_de", "metrik"])["wert"].mean().reset_index()
+    # Durchschnitt pro Wochentag UND Brand berechnen
+    weekday_avg = df_weekday.groupby(["wochentag", "wochentag_de", "brand", "metrik"])["wert"].mean().reset_index()
     weekday_avg = weekday_avg.sort_values("wochentag")
+    
+    # Farben für Brands
+    brand_colors = {"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
     
     if not weekday_avg.empty:
         col1, col2 = st.columns(2)
@@ -458,15 +461,16 @@ with tab1:
                     pi_weekday,
                     x="wochentag_de",
                     y="wert",
+                    color="brand",
+                    barmode="group",
                     title="Ø Page Impressions pro Wochentag",
-                    color="wert",
-                    color_continuous_scale=["#93C5FD", "#2563EB"]
+                    color_discrete_map=brand_colors
                 )
                 fig_pi_week.update_layout(
-                    showlegend=False, 
                     yaxis=dict(tickformat=","),
-                    coloraxis_showscale=False,
-                    xaxis_title=""
+                    xaxis_title="",
+                    legend_title="Property",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 st.plotly_chart(fig_pi_week, use_container_width=True)
         
@@ -477,33 +481,46 @@ with tab1:
                     visits_weekday,
                     x="wochentag_de",
                     y="wert",
+                    color="brand",
+                    barmode="group",
                     title="Ø Visits pro Wochentag",
-                    color="wert",
-                    color_continuous_scale=["#FDBA74", "#EA580C"]
+                    color_discrete_map=brand_colors
                 )
                 fig_visits_week.update_layout(
-                    showlegend=False, 
                     yaxis=dict(tickformat=","),
-                    coloraxis_showscale=False,
-                    xaxis_title=""
+                    xaxis_title="",
+                    legend_title="Property",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 st.plotly_chart(fig_visits_week, use_container_width=True)
         
-        # Insights: Bester und schlechtester Tag
-        if "Page Impressions" in weekday_avg["metrik"].values:
-            pi_data = weekday_avg[weekday_avg["metrik"] == "Page Impressions"]
-            best_day = pi_data.loc[pi_data["wert"].idxmax()]
-            worst_day = pi_data.loc[pi_data["wert"].idxmin()]
-            avg_all = pi_data["wert"].mean()
+        # Insights: Bester und schlechtester Tag PRO BRAND
+        st.markdown("**📈 Erkenntnisse (Page Impressions):**")
+        
+        pi_data = weekday_avg[weekday_avg["metrik"] == "Page Impressions"]
+        if not pi_data.empty:
+            insights_cols = st.columns(len(pi_data["brand"].unique()))
             
-            best_pct = ((best_day["wert"] - avg_all) / avg_all * 100)
-            worst_pct = ((worst_day["wert"] - avg_all) / avg_all * 100)
-            
-            st.markdown(f"""
-            **📈 Erkenntnisse:**
-            - **Bester Tag:** {best_day['wochentag_de']} ({best_pct:+.1f}% über Durchschnitt)
-            - **Schwächster Tag:** {worst_day['wochentag_de']} ({worst_pct:+.1f}% unter Durchschnitt)
-            """)
+            for idx, brand in enumerate(sorted(pi_data["brand"].unique())):
+                brand_data = pi_data[pi_data["brand"] == brand]
+                if not brand_data.empty:
+                    best_day = brand_data.loc[brand_data["wert"].idxmax()]
+                    worst_day = brand_data.loc[brand_data["wert"].idxmin()]
+                    avg_brand = brand_data["wert"].mean()
+                    
+                    best_pct = ((best_day["wert"] - avg_brand) / avg_brand * 100)
+                    worst_pct = ((worst_day["wert"] - avg_brand) / avg_brand * 100)
+                    
+                    brand_color = "#3B82F6" if brand == "VOL" else "#8B5CF6"
+                    
+                    with insights_cols[idx]:
+                        st.markdown(f"""
+                        <div style="padding: 10px; border-left: 4px solid {brand_color}; background: #f8f9fa; border-radius: 4px;">
+                            <strong style="color: {brand_color};">{brand}</strong><br>
+                            📈 Bester: <strong>{best_day['wochentag_de']}</strong> ({best_pct:+.1f}%)<br>
+                            📉 Schwächster: <strong>{worst_day['wochentag_de']}</strong> ({worst_pct:+.1f}%)
+                        </div>
+                        """, unsafe_allow_html=True)
     else:
         st.info("Nicht genügend Daten für Wochentags-Analyse.")
 
