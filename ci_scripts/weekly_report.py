@@ -306,32 +306,54 @@ def generate_gpt_summary(data: Dict) -> str:
     if not OPENAI_API_KEY:
         return "GPT-Zusammenfassung nicht verfügbar (API Key fehlt)"
     
+    # Veränderungen formatieren (None → "nicht verfügbar")
+    vol_pi_change = f"{data.get('vol_pi_change')}%" if data.get('vol_pi_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
+    vol_visits_change = f"{data.get('vol_visits_change')}%" if data.get('vol_visits_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
+    vienna_pi_change = f"{data.get('vienna_pi_change')}%" if data.get('vienna_pi_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
+    vienna_visits_change = f"{data.get('vienna_visits_change')}%" if data.get('vienna_visits_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
+    
+    # Datenqualitätshinweis
+    data_quality = data.get('data_quality_note', '')
+    data_quality_section = f"\nDATENQUALITÄT:\n{data_quality}\n" if data_quality else ""
+    
     prompt = f"""Du bist ein Web-Analytics-Experte für österreichische Medienunternehmen.
 Analysiere die folgenden ÖWA-Daten für VOL.AT und VIENNA.AT und erstelle eine kurze, professionelle Zusammenfassung auf Deutsch.
 
-DATEN DER LETZTEN WOCHE:
-
+BERICHTSZEITRAUM: {data.get('period', 'N/A')}
+Datenpunkte aktuelle Woche: {data.get('current_days', 'N/A')} Tage
+Datenpunkte Vorwoche: {data.get('prev_days', 'N/A')} Tage
+{data_quality_section}
 VOL.AT:
-- Page Impressions: {data.get('vol_pi_week', 'N/A'):,} (Durchschnitt/Tag: {data.get('vol_pi_avg', 'N/A'):,.0f})
-- Visits: {data.get('vol_visits_week', 'N/A'):,} (Durchschnitt/Tag: {data.get('vol_visits_avg', 'N/A'):,.0f})
-- Veränderung vs. Vorwoche PI: {data.get('vol_pi_change', 'N/A')}%
-- Veränderung vs. Vorwoche Visits: {data.get('vol_visits_change', 'N/A')}%
+- Page Impressions gesamt: {data.get('vol_pi_week', 0):,}
+- Durchschnitt pro Tag: {data.get('vol_pi_avg', 0):,.0f}
+- Visits gesamt: {data.get('vol_visits_week', 0):,}
+- Durchschnitt pro Tag: {data.get('vol_visits_avg', 0):,.0f}
+- Veränderung vs. Vorwoche PI: {vol_pi_change}
+- Veränderung vs. Vorwoche Visits: {vol_visits_change}
 
 VIENNA.AT:
-- Page Impressions: {data.get('vienna_pi_week', 'N/A'):,} (Durchschnitt/Tag: {data.get('vienna_pi_avg', 'N/A'):,.0f})
-- Visits: {data.get('vienna_visits_week', 'N/A'):,} (Durchschnitt/Tag: {data.get('vienna_visits_avg', 'N/A'):,.0f})
-- Veränderung vs. Vorwoche PI: {data.get('vienna_pi_change', 'N/A')}%
-- Veränderung vs. Vorwoche Visits: {data.get('vienna_visits_change', 'N/A')}%
+- Page Impressions gesamt: {data.get('vienna_pi_week', 0):,}
+- Durchschnitt pro Tag: {data.get('vienna_pi_avg', 0):,.0f}
+- Visits gesamt: {data.get('vienna_visits_week', 0):,}
+- Durchschnitt pro Tag: {data.get('vienna_visits_avg', 0):,.0f}
+- Veränderung vs. Vorwoche PI: {vienna_pi_change}
+- Veränderung vs. Vorwoche Visits: {vienna_visits_change}
 
-ANOMALIEN:
+ANOMALIEN (basierend auf Tageswert-Analyse):
 {data.get('anomalies_text', 'Keine Anomalien erkannt.')}
 
-Erstelle eine Zusammenfassung mit:
-1. Überblick der Wochenperformance (2-3 Sätze)
-2. Wichtige Veränderungen oder Auffälligkeiten
-3. Kurze Einschätzung/Empfehlung
+WICHTIGE HINWEISE FÜR DIE ANALYSE:
+- Fokussiere auf die DURCHSCHNITTSWERTE pro Tag, nicht nur auf die Gesamtsummen
+- Falls Vorwochenvergleiche "nicht verfügbar" sind, liegt das an unvollständigen historischen Daten - erwähne das
+- Anomalien beziehen sich auf den LETZTEN TAGESWERT im Vergleich zum historischen Median
+- Sei vorsichtig bei der Interpretation von extremen Veränderungen (>50%)
 
-Halte die Zusammenfassung prägnant (max. 150 Wörter).
+Erstelle eine Zusammenfassung mit:
+1. Überblick der Wochenperformance mit Fokus auf Tagesdurchschnitte (2-3 Sätze)
+2. Wichtige Auffälligkeiten oder Anomalien (falls vorhanden)
+3. Kurze Einschätzung
+
+Halte die Zusammenfassung prägnant (max. 150 Wörter). Vermeide Spekulationen über Ursachen.
 """
 
     try:
@@ -381,22 +403,37 @@ def send_teams_report(title: str, summary: str, data: Dict, anomalies: List[Dict
     else:
         color = "28A745"  # Grün
     
-    # Facts für die Karte
+    # Veränderungen formatieren (nur anzeigen wenn valide)
+    def format_change(change_val):
+        if change_val is None:
+            return ""
+        return f" ({change_val:+.1f}%)"
+    
+    # Facts für die Karte - mit Durchschnittswerten
     facts = [
         {"name": "📅 Zeitraum", "value": data.get("period", "N/A")},
-        {"name": "📊 VOL.AT PI", "value": f"{data.get('vol_pi_week', 0):,}"},
-        {"name": "👥 VOL.AT Visits", "value": f"{data.get('vol_visits_week', 0):,}"},
-        {"name": "📊 VIENNA.AT PI", "value": f"{data.get('vienna_pi_week', 0):,}"},
-        {"name": "👥 VIENNA.AT Visits", "value": f"{data.get('vienna_visits_week', 0):,}"},
+        {"name": "📊 VOL.AT PI", "value": f"{data.get('vol_pi_week', 0):,}{format_change(data.get('vol_pi_change'))}"},
+        {"name": "📈 VOL.AT Ø/Tag", "value": f"{data.get('vol_pi_avg', 0):,.0f}"},
+        {"name": "👥 VOL.AT Visits", "value": f"{data.get('vol_visits_week', 0):,}{format_change(data.get('vol_visits_change'))}"},
+        {"name": "📊 VIENNA.AT PI", "value": f"{data.get('vienna_pi_week', 0):,}{format_change(data.get('vienna_pi_change'))}"},
+        {"name": "📈 VIENNA.AT Ø/Tag", "value": f"{data.get('vienna_pi_avg', 0):,.0f}"},
+        {"name": "👥 VIENNA.AT Visits", "value": f"{data.get('vienna_visits_week', 0):,}{format_change(data.get('vienna_visits_change'))}"},
     ]
     
-    # Anomalien-Text
+    # Datenqualitäts-Hinweis wenn nötig
+    data_quality_note = data.get("data_quality_note")
+    
+    # Anomalien-Text - verbesserte Darstellung
     anomaly_text = ""
     if anomalies:
-        anomaly_text = "\n\n**⚠️ Anomalien:**\n"
+        anomaly_text = "\n\n**⚠️ Tageswert-Anomalien:**\n"
         for a in anomalies[:5]:  # Max 5 anzeigen
             icon = "🔴" if a["severity"] == "critical" else "🟡"
-            anomaly_text += f"- {icon} {a['brand']} {a['metric']}: {a['pct_delta']:+.1f}% (Z={a['zscore']:.1f})\n"
+            direction = "über" if a['pct_delta'] > 0 else "unter"
+            anomaly_text += f"- {icon} {a['brand']} {a['metric']}: Letzter Tag {abs(a['pct_delta']):.1f}% {direction} Median\n"
+    
+    # Datenqualitätshinweis formatieren
+    quality_text = f"\n\n**📋 Datenhinweis:** {data_quality_note}" if data_quality_note else ""
     
     # Sections aufbauen
     sections = [
@@ -406,7 +443,7 @@ def send_teams_report(title: str, summary: str, data: Dict, anomalies: List[Dict
             "markdown": True
         },
         {
-            "text": f"**🤖 KI-Analyse:**\n\n{summary}{anomaly_text}",
+            "text": f"**🤖 KI-Analyse:**\n\n{summary}{anomaly_text}{quality_text}",
             "markdown": True
         }
     ]
@@ -541,36 +578,75 @@ def run_weekly_report():
     # Statistiken berechnen
     print("\n📈 Berechne Statistiken...")
     
+    # Anzahl der Tage pro Woche zählen (für Datenqualitätsprüfung)
+    current_days_vol = len(current_week["VOL"]["Page Impressions"])
+    current_days_vienna = len(current_week["Vienna"]["Page Impressions"])
+    prev_days_vol = len(prev_week["VOL"]["Page Impressions"])
+    prev_days_vienna = len(prev_week["Vienna"]["Page Impressions"])
+    
     data = {
         "period": f"{week_start.strftime('%d.%m.')} - {today.strftime('%d.%m.%Y')}",
         "vol_pi_week": sum(current_week["VOL"]["Page Impressions"]),
-        "vol_pi_avg": sum(current_week["VOL"]["Page Impressions"]) / max(1, len(current_week["VOL"]["Page Impressions"])),
+        "vol_pi_avg": sum(current_week["VOL"]["Page Impressions"]) / max(1, current_days_vol),
         "vol_visits_week": sum(current_week["VOL"]["Visits"]),
-        "vol_visits_avg": sum(current_week["VOL"]["Visits"]) / max(1, len(current_week["VOL"]["Visits"])),
+        "vol_visits_avg": sum(current_week["VOL"]["Visits"]) / max(1, current_days_vol),
         "vienna_pi_week": sum(current_week["Vienna"]["Page Impressions"]),
-        "vienna_pi_avg": sum(current_week["Vienna"]["Page Impressions"]) / max(1, len(current_week["Vienna"]["Page Impressions"])),
+        "vienna_pi_avg": sum(current_week["Vienna"]["Page Impressions"]) / max(1, current_days_vienna),
         "vienna_visits_week": sum(current_week["Vienna"]["Visits"]),
-        "vienna_visits_avg": sum(current_week["Vienna"]["Visits"]) / max(1, len(current_week["Vienna"]["Visits"])),
+        "vienna_visits_avg": sum(current_week["Vienna"]["Visits"]) / max(1, current_days_vienna),
+        # Datenqualität
+        "current_days": current_days_vol,
+        "prev_days": prev_days_vol,
     }
     
-    # Veränderungen berechnen
+    # Veränderungen berechnen - NUR wenn beide Wochen vergleichbare Datenmenge haben
     prev_vol_pi = sum(prev_week["VOL"]["Page Impressions"])
     prev_vol_visits = sum(prev_week["VOL"]["Visits"])
     prev_vienna_pi = sum(prev_week["Vienna"]["Page Impressions"])
     prev_vienna_visits = sum(prev_week["Vienna"]["Visits"])
     
-    data["vol_pi_change"] = round((data["vol_pi_week"] - prev_vol_pi) / max(1, prev_vol_pi) * 100, 1) if prev_vol_pi else 0
-    data["vol_visits_change"] = round((data["vol_visits_week"] - prev_vol_visits) / max(1, prev_vol_visits) * 100, 1) if prev_vol_visits else 0
-    data["vienna_pi_change"] = round((data["vienna_pi_week"] - prev_vienna_pi) / max(1, prev_vienna_pi) * 100, 1) if prev_vienna_pi else 0
-    data["vienna_visits_change"] = round((data["vienna_visits_week"] - prev_vienna_visits) / max(1, prev_vienna_visits) * 100, 1) if prev_vienna_visits else 0
+    # Datenqualitätsprüfung: Mindestens 5 Tage in beiden Wochen für validen Vergleich
+    data_quality_ok = prev_days_vol >= 5 and current_days_vol >= 5
     
-    print(f"   VOL.AT PI: {data['vol_pi_week']:,} ({data['vol_pi_change']:+.1f}%)")
-    print(f"   VOL.AT Visits: {data['vol_visits_week']:,} ({data['vol_visits_change']:+.1f}%)")
-    print(f"   VIENNA.AT PI: {data['vienna_pi_week']:,} ({data['vienna_pi_change']:+.1f}%)")
-    print(f"   VIENNA.AT Visits: {data['vienna_visits_week']:,} ({data['vienna_visits_change']:+.1f}%)")
+    if data_quality_ok and prev_vol_pi > 0:
+        data["vol_pi_change"] = round((data["vol_pi_week"] - prev_vol_pi) / prev_vol_pi * 100, 1)
+    else:
+        data["vol_pi_change"] = None
+        
+    if data_quality_ok and prev_vol_visits > 0:
+        data["vol_visits_change"] = round((data["vol_visits_week"] - prev_vol_visits) / prev_vol_visits * 100, 1)
+    else:
+        data["vol_visits_change"] = None
+        
+    if data_quality_ok and prev_vienna_pi > 0:
+        data["vienna_pi_change"] = round((data["vienna_pi_week"] - prev_vienna_pi) / prev_vienna_pi * 100, 1)
+    else:
+        data["vienna_pi_change"] = None
+        
+    if data_quality_ok and prev_vienna_visits > 0:
+        data["vienna_visits_change"] = round((data["vienna_visits_week"] - prev_vienna_visits) / prev_vienna_visits * 100, 1)
+    else:
+        data["vienna_visits_change"] = None
     
-    # Anomalie-Erkennung
-    print("\n🔍 Anomalie-Erkennung...")
+    # Datenqualitäts-Hinweis
+    if not data_quality_ok:
+        data["data_quality_note"] = f"⚠️ Eingeschränkte Vergleichbarkeit: Aktuelle Woche {current_days_vol} Tage, Vorwoche {prev_days_vol} Tage"
+        print(f"   ⚠️ Datenqualität: Aktuelle Woche {current_days_vol} Tage, Vorwoche {prev_days_vol} Tage")
+    else:
+        data["data_quality_note"] = None
+    
+    vol_pi_str = f"{data['vol_pi_change']:+.1f}%" if data['vol_pi_change'] is not None else "N/A (Daten unvollständig)"
+    vol_visits_str = f"{data['vol_visits_change']:+.1f}%" if data['vol_visits_change'] is not None else "N/A (Daten unvollständig)"
+    vienna_pi_str = f"{data['vienna_pi_change']:+.1f}%" if data['vienna_pi_change'] is not None else "N/A (Daten unvollständig)"
+    vienna_visits_str = f"{data['vienna_visits_change']:+.1f}%" if data['vienna_visits_change'] is not None else "N/A (Daten unvollständig)"
+    
+    print(f"   VOL.AT PI: {data['vol_pi_week']:,} ({vol_pi_str})")
+    print(f"   VOL.AT Visits: {data['vol_visits_week']:,} ({vol_visits_str})")
+    print(f"   VIENNA.AT PI: {data['vienna_pi_week']:,} ({vienna_pi_str})")
+    print(f"   VIENNA.AT Visits: {data['vienna_visits_week']:,} ({vienna_visits_str})")
+    
+    # Anomalie-Erkennung (basierend auf Tageswerten)
+    print("\n🔍 Anomalie-Erkennung (letzter Tageswert vs. historischer Median)...")
     anomalies = []
     
     for brand in ["VOL", "Vienna"]:
@@ -584,18 +660,24 @@ def run_weekly_report():
                     if anomaly["is_anomaly"]:
                         anomaly["brand"] = brand
                         anomaly["metric"] = metric
+                        anomaly["latest_value"] = latest
+                        anomaly["median_value"] = stats["median"]
                         anomalies.append(anomaly)
-                        print(f"   ⚠️ {brand} {metric}: {anomaly['severity'].upper()} (Z={anomaly['zscore']}, {anomaly['pct_delta']:+.1f}%)")
+                        print(f"   ⚠️ {brand} {metric}: {anomaly['severity'].upper()}")
+                        print(f"      Letzter Tag: {latest:,.0f} | Median: {stats['median']:,.0f} | Abweichung: {anomaly['pct_delta']:+.1f}%")
     
     if not anomalies:
         print("   ✅ Keine Anomalien erkannt")
     
-    # Anomalien-Text für GPT
+    # Anomalien-Text für GPT - präzisere Beschreibung
     if anomalies:
-        data["anomalies_text"] = "\n".join([
-            f"- {a['brand']} {a['metric']}: {a['severity'].upper()}, Z-Score={a['zscore']}, Abweichung={a['pct_delta']:+.1f}%"
-            for a in anomalies
-        ])
+        anomaly_lines = []
+        for a in anomalies:
+            direction = "über" if a['pct_delta'] > 0 else "unter"
+            anomaly_lines.append(
+                f"- {a['brand']} {a['metric']}: Der letzte Tageswert ({a['latest_value']:,.0f}) liegt {abs(a['pct_delta']):.1f}% {direction} dem historischen Median ({a['median_value']:,.0f}). Z-Score: {a['zscore']}"
+            )
+        data["anomalies_text"] = "\n".join(anomaly_lines)
     else:
         data["anomalies_text"] = "Keine Anomalien erkannt."
     
