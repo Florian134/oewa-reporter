@@ -429,24 +429,83 @@ with tab1:
         else:
             st.info("Keine Visits Daten für den ausgewählten Zeitraum.")
     
-    # Daily trend
-    st.subheader("📅 Täglicher Trend")
+    # Wochentags-Analyse (ersetzt irreführenden "Täglichen Trend")
+    st.subheader("📅 Wochentags-Analyse")
     
-    daily = df_filtered.groupby(["datum", "metrik"])["wert"].sum().reset_index()
+    # Wochentag extrahieren (0=Montag, 6=Sonntag)
+    df_weekday = df_filtered.copy()
+    df_weekday["wochentag"] = df_weekday["datum"].dt.dayofweek
+    df_weekday["wochentag_name"] = df_weekday["datum"].dt.day_name()
     
-    if not daily.empty:
-        fig_trend = px.line(
-            daily,
-            x="datum",
-            y="wert",
-            color="metrik",
-            title="Tägliche Entwicklung",
-            color_discrete_map={"Page Impressions": "#3B82F6", "Visits": "#F97316"}
-        )
-        fig_trend.update_layout(yaxis=dict(tickformat=","))
-        st.plotly_chart(fig_trend, use_container_width=True)
+    # Deutsche Wochentags-Namen
+    weekday_map = {
+        "Monday": "Montag", "Tuesday": "Dienstag", "Wednesday": "Mittwoch",
+        "Thursday": "Donnerstag", "Friday": "Freitag", "Saturday": "Samstag", "Sunday": "Sonntag"
+    }
+    df_weekday["wochentag_de"] = df_weekday["wochentag_name"].map(weekday_map)
+    
+    # Durchschnitt pro Wochentag berechnen
+    weekday_avg = df_weekday.groupby(["wochentag", "wochentag_de", "metrik"])["wert"].mean().reset_index()
+    weekday_avg = weekday_avg.sort_values("wochentag")
+    
+    if not weekday_avg.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            pi_weekday = weekday_avg[weekday_avg["metrik"] == "Page Impressions"]
+            if not pi_weekday.empty:
+                fig_pi_week = px.bar(
+                    pi_weekday,
+                    x="wochentag_de",
+                    y="wert",
+                    title="Ø Page Impressions pro Wochentag",
+                    color="wert",
+                    color_continuous_scale=["#93C5FD", "#2563EB"]
+                )
+                fig_pi_week.update_layout(
+                    showlegend=False, 
+                    yaxis=dict(tickformat=","),
+                    coloraxis_showscale=False,
+                    xaxis_title=""
+                )
+                st.plotly_chart(fig_pi_week, use_container_width=True)
+        
+        with col2:
+            visits_weekday = weekday_avg[weekday_avg["metrik"] == "Visits"]
+            if not visits_weekday.empty:
+                fig_visits_week = px.bar(
+                    visits_weekday,
+                    x="wochentag_de",
+                    y="wert",
+                    title="Ø Visits pro Wochentag",
+                    color="wert",
+                    color_continuous_scale=["#FDBA74", "#EA580C"]
+                )
+                fig_visits_week.update_layout(
+                    showlegend=False, 
+                    yaxis=dict(tickformat=","),
+                    coloraxis_showscale=False,
+                    xaxis_title=""
+                )
+                st.plotly_chart(fig_visits_week, use_container_width=True)
+        
+        # Insights: Bester und schlechtester Tag
+        if "Page Impressions" in weekday_avg["metrik"].values:
+            pi_data = weekday_avg[weekday_avg["metrik"] == "Page Impressions"]
+            best_day = pi_data.loc[pi_data["wert"].idxmax()]
+            worst_day = pi_data.loc[pi_data["wert"].idxmin()]
+            avg_all = pi_data["wert"].mean()
+            
+            best_pct = ((best_day["wert"] - avg_all) / avg_all * 100)
+            worst_pct = ((worst_day["wert"] - avg_all) / avg_all * 100)
+            
+            st.markdown(f"""
+            **📈 Erkenntnisse:**
+            - **Bester Tag:** {best_day['wochentag_de']} ({best_pct:+.1f}% über Durchschnitt)
+            - **Schwächster Tag:** {worst_day['wochentag_de']} ({worst_pct:+.1f}% unter Durchschnitt)
+            """)
     else:
-        st.info("Keine Daten für den ausgewählten Zeitraum.")
+        st.info("Nicht genügend Daten für Wochentags-Analyse.")
 
 # -----------------------------------------------------------------------------
 # TAB 2: DATENTABELLE
@@ -492,14 +551,17 @@ with tab2:
 with tab3:
     st.subheader("📈 Zeitreihen-Analyse")
     
-    # 7-day moving average
-    daily = df_filtered.groupby(["datum", "metrik"])["wert"].sum().reset_index()
+    # Daten pro Tag aggregieren (nur Datum, ohne Uhrzeit)
+    daily = df_filtered.copy()
+    daily["datum_tag"] = daily["datum"].dt.date  # Nur Datum ohne Uhrzeit
+    daily = daily.groupby(["datum_tag", "metrik"])["wert"].sum().reset_index()
+    daily["datum_tag"] = pd.to_datetime(daily["datum_tag"])  # Zurück zu datetime für Plotly
     
     if daily.empty:
         st.info("Keine Daten für den ausgewählten Zeitraum.")
     else:
         for metrik in ["Page Impressions", "Visits"]:
-            metric_data = daily[daily["metrik"] == metrik].sort_values("datum")
+            metric_data = daily[daily["metrik"] == metrik].sort_values("datum_tag")
             
             if metric_data.empty:
                 st.info(f"Keine {metrik} Daten verfügbar.")
@@ -508,16 +570,20 @@ with tab3:
             metric_data = metric_data.copy()
             metric_data["7d_avg"] = metric_data["wert"].rolling(window=7, min_periods=1).mean()
             
+            # Formatiertes Datum für X-Achse (dd.mm.)
+            metric_data["datum_label"] = metric_data["datum_tag"].dt.strftime("%d.%m.")
+            
             fig = go.Figure()
             fig.add_trace(go.Scatter(
-                x=metric_data["datum"],
+                x=metric_data["datum_tag"],
                 y=metric_data["wert"],
-                mode="lines",
+                mode="lines+markers",  # Punkte hinzufügen für bessere Sichtbarkeit
                 name="Tageswert",
-                line=dict(color="#93C5FD" if metrik == "Page Impressions" else "#FDBA74")
+                line=dict(color="#93C5FD" if metrik == "Page Impressions" else "#FDBA74"),
+                marker=dict(size=6)
             ))
             fig.add_trace(go.Scatter(
-                x=metric_data["datum"],
+                x=metric_data["datum_tag"],
                 y=metric_data["7d_avg"],
                 mode="lines",
                 name="7-Tage Ø",
@@ -525,7 +591,14 @@ with tab3:
             ))
             fig.update_layout(
                 title=f"{metrik} - Trend mit 7-Tage-Durchschnitt",
-                yaxis_tickformat=","
+                yaxis_tickformat=",",
+                xaxis=dict(
+                    tickformat="%d.%m.",  # Nur Tag.Monat anzeigen
+                    dtick="D1",  # Ein Tick pro Tag
+                    tickangle=-45
+                ),
+                xaxis_title="Datum",
+                yaxis_title="Wert"
             )
             st.plotly_chart(fig, use_container_width=True)
 
