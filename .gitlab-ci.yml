@@ -51,7 +51,7 @@ backfill:
 
 # =============================================================================
 # WEEKLY REPORT - Wöchentlicher Bericht mit Diagrammen
-# Triggern mit JOB_TYPE=weekly
+# Triggern mit: JOB_TYPE=weekly ODER Branch "weekly-trigger"
 # =============================================================================
 weekly_report:
   stage: run
@@ -65,6 +65,7 @@ weekly_report:
     - echo "✅ Weekly Report completed!"
   rules:
     - if: $JOB_TYPE == "weekly"
+    - if: $CI_COMMIT_REF_NAME == "weekly-trigger" && $CI_PIPELINE_SOURCE == "trigger"
 
 # =============================================================================
 # ALERT CHECK - Tägliche Schwellenwert-Prüfung mit GPT-Analyse
