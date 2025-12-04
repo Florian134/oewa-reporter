@@ -23,6 +23,73 @@ st.set_page_config(
 )
 
 # =============================================================================
+# 🔐 AUTHENTICATION - Passwort-Schutz
+# =============================================================================
+def check_password():
+    """Prüft ob der Benutzer das korrekte Passwort eingegeben hat."""
+    
+    def password_entered():
+        """Callback wenn Passwort eingegeben wurde."""
+        entered_password = st.session_state.get("password", "")
+        correct_password = st.secrets.get("app_password", "")
+        
+        if entered_password == correct_password:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Passwort nicht speichern
+        else:
+            st.session_state["password_correct"] = False
+
+    # Prüfen ob Passwort in Secrets konfiguriert ist
+    if not st.secrets.get("app_password"):
+        st.warning("⚠️ Kein Passwort konfiguriert. Bitte 'app_password' in Streamlit Secrets setzen.")
+        return True  # Ohne Passwort-Config durchlassen (für Entwicklung)
+    
+    if "password_correct" not in st.session_state:
+        # Erster Aufruf - Passwort-Eingabe anzeigen
+        st.markdown("""
+        <div style="display: flex; justify-content: center; align-items: center; height: 60vh;">
+            <div style="text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                <h1>🔐 ÖWA Reporting Dashboard</h1>
+                <p style="color: #666;">Bitte Passwort eingeben um fortzufahren</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.text_input(
+                "Passwort", 
+                type="password", 
+                on_change=password_entered, 
+                key="password",
+                placeholder="Passwort eingeben..."
+            )
+            st.caption("🔒 Zugang nur für autorisierte Benutzer")
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # Falsches Passwort eingegeben
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.text_input(
+                "Passwort", 
+                type="password", 
+                on_change=password_entered, 
+                key="password",
+                placeholder="Passwort eingeben..."
+            )
+            st.error("❌ Falsches Passwort. Bitte erneut versuchen.")
+        return False
+    
+    else:
+        # Passwort korrekt
+        return True
+
+# Passwort-Check ausführen - stoppt hier wenn nicht authentifiziert
+if not check_password():
+    st.stop()
+
+# =============================================================================
 # AIRTABLE CONFIG (from Streamlit Secrets)
 # =============================================================================
 AIRTABLE_API_KEY = st.secrets.get("AIRTABLE_API_KEY", os.getenv("AIRTABLE_API_KEY", ""))
@@ -289,6 +356,12 @@ selected_metrics = st.sidebar.multiselect("Metriken", metrics, default=metrics)
 df_filtered = df_filtered[df_filtered["metrik"].isin(selected_metrics)]
 
 st.sidebar.markdown(f"**{len(df_filtered)} Datensätze**")
+
+# Logout-Button
+st.sidebar.markdown("---")
+if st.sidebar.button("🚪 Abmelden", use_container_width=True):
+    st.session_state["password_correct"] = False
+    st.rerun()
 
 # =============================================================================
 # VERGLEICHSDATEN VORBEREITEN (für alle Diagramme)
