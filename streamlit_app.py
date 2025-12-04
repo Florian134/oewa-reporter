@@ -158,22 +158,35 @@ st.sidebar.info(f"📅 **Verfügbare Daten:**\n{data_min_date.strftime('%d.%m.%Y
 
 # Date range - Messzeitraum
 st.sidebar.subheader("📊 Messzeitraum")
-col1, col2 = st.sidebar.columns(2)
-default_end = min(date.today(), data_max_date)
-default_start = max(default_end - timedelta(days=30), data_min_date)
 
-start_date = col1.date_input("Von", default_start, min_value=data_min_date, max_value=data_max_date)
-end_date = col2.date_input("Bis", default_end, min_value=data_min_date, max_value=data_max_date)
+# Initialize session state for date range
+if "start_date" not in st.session_state:
+    st.session_state.start_date = max(min(date.today(), data_max_date) - timedelta(days=30), data_min_date)
+if "end_date" not in st.session_state:
+    st.session_state.end_date = min(date.today(), data_max_date)
 
-# Quick select
+# Quick select buttons (above date inputs for better UX)
 col_btn1, col_btn2 = st.sidebar.columns(2)
 if col_btn1.button("Letzte 7 Tage"):
-    start_date = max(date.today() - timedelta(days=7), data_min_date)
-    end_date = min(date.today(), data_max_date)
+    st.session_state.start_date = max(date.today() - timedelta(days=7), data_min_date)
+    st.session_state.end_date = min(date.today(), data_max_date)
+    st.rerun()
 
 if col_btn2.button("Letzte 30 Tage"):
-    start_date = max(date.today() - timedelta(days=30), data_min_date)
-    end_date = min(date.today(), data_max_date)
+    st.session_state.start_date = max(date.today() - timedelta(days=30), data_min_date)
+    st.session_state.end_date = min(date.today(), data_max_date)
+    st.rerun()
+
+# Date inputs with session state
+col1, col2 = st.sidebar.columns(2)
+start_date = col1.date_input("Von", st.session_state.start_date, min_value=data_min_date, max_value=data_max_date, key="start_input")
+end_date = col2.date_input("Bis", st.session_state.end_date, min_value=data_min_date, max_value=data_max_date, key="end_input")
+
+# Sync date inputs back to session state
+if start_date != st.session_state.start_date:
+    st.session_state.start_date = start_date
+if end_date != st.session_state.end_date:
+    st.session_state.end_date = end_date
 
 # =============================================================================
 # COMPARISON PERIOD SELECTION (wie Google Analytics)
