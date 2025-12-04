@@ -196,48 +196,39 @@ days = (end_date - start_date).days or 1
 pi_avg = pi_total / days
 visits_avg = visits_total / days
 
-# Calculate week-over-week change
-# WICHTIG: Vergleiche immer die letzten 7 Tage mit den 7 Tagen davor
-# (unabhängig vom ausgewählten Zeitraum)
-week_end = end_date
-week_start = week_end - timedelta(days=6)  # Letzte 7 Tage
+# Calculate period-over-period change
+# FIX: Vergleiche gleich lange Zeiträume + gleiche Filter (brands & metrics)
+selected_days = (end_date - start_date).days + 1  # Anzahl Tage inkl. beider Enden
 
-prev_week_end = week_start - timedelta(days=1)  # Tag vor der aktuellen Woche
-prev_week_start = prev_week_end - timedelta(days=6)  # 7 Tage davor
+# Vorperiode = gleich langer Zeitraum direkt vor der Auswahl
+prev_end = start_date - timedelta(days=1)
+prev_start = prev_end - timedelta(days=selected_days - 1)
 
-# Aktuelle Woche (letzte 7 Tage)
-df_current_week = df[
-    (df["datum"].dt.date >= week_start) & 
-    (df["datum"].dt.date <= week_end) &
-    (df["brand"].isin(selected_brands))
+# Gleiche Filter wie Hauptauswahl (brands UND metrics)
+df_prev = df[
+    (df["datum"].dt.date >= prev_start) & 
+    (df["datum"].dt.date <= prev_end) &
+    (df["brand"].isin(selected_brands)) &
+    (df["metrik"].isin(selected_metrics))
 ]
-pi_current_week = df_current_week[df_current_week["metrik"] == "Page Impressions"]["wert"].sum()
-visits_current_week = df_current_week[df_current_week["metrik"] == "Visits"]["wert"].sum()
+pi_prev = df_prev[df_prev["metrik"] == "Page Impressions"]["wert"].sum()
+visits_prev = df_prev[df_prev["metrik"] == "Visits"]["wert"].sum()
 
-# Vorwoche (7 Tage davor)
-df_prev_week = df[
-    (df["datum"].dt.date >= prev_week_start) & 
-    (df["datum"].dt.date <= prev_week_end) &
-    (df["brand"].isin(selected_brands))
-]
-pi_prev_week = df_prev_week[df_prev_week["metrik"] == "Page Impressions"]["wert"].sum()
-visits_prev_week = df_prev_week[df_prev_week["metrik"] == "Visits"]["wert"].sum()
-
-pi_change = ((pi_current_week - pi_prev_week) / pi_prev_week * 100) if pi_prev_week > 0 else 0
-visits_change = ((visits_current_week - visits_prev_week) / visits_prev_week * 100) if visits_prev_week > 0 else 0
+pi_change = ((pi_total - pi_prev) / pi_prev * 100) if pi_prev > 0 else 0
+visits_change = ((visits_total - visits_prev) / visits_prev * 100) if visits_prev > 0 else 0
 
 with col1:
     st.metric(
         label="Page Impressions (Gesamt)",
         value=f"{pi_total:,.0f}".replace(",", "."),
-        delta=f"{pi_change:+.1f}% vs. Vorwoche"
+        delta=f"{pi_change:+.1f}% vs. Vorperiode"
     )
 
 with col2:
     st.metric(
         label="Visits (Gesamt)",
         value=f"{visits_total:,.0f}".replace(",", "."),
-        delta=f"{visits_change:+.1f}% vs. Vorwoche"
+        delta=f"{visits_change:+.1f}% vs. Vorperiode"
     )
 
 with col3:
