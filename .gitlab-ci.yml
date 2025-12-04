@@ -50,7 +50,8 @@ backfill:
     - if: $JOB_TYPE == "backfill"
 
 # =============================================================================
-# WEEKLY REPORT - Wöchentlicher Bericht (manuell triggern mit JOB_TYPE=weekly)
+# WEEKLY REPORT - Wöchentlicher Bericht mit Diagrammen
+# Triggern mit JOB_TYPE=weekly
 # =============================================================================
 weekly_report:
   stage: run
@@ -58,7 +59,8 @@ weekly_report:
   script:
     - echo "📊 ÖWA Reporter - Weekly Report"
     - pip install --upgrade pip
-    - pip install requests python-dotenv openai
+    # Für Diagramme: plotly, kaleido, pandas
+    - pip install requests python-dotenv openai plotly kaleido pandas
     - python ci_scripts/weekly_report.py
     - echo "✅ Weekly Report completed!"
   rules:

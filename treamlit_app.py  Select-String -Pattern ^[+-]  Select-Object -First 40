@@ -1,0 +1,74 @@
+[1mdiff --git a/streamlit_app.py b/streamlit_app.py[m
+[1mindex f508edc..8426ca8 100644[m
+[1m--- a/streamlit_app.py[m
+[1m+++ b/streamlit_app.py[m
+[36m@@ -196,48 +196,40 @@[m [mdays = (end_date - start_date).days or 1[m
+ pi_avg = pi_total / days[m
+ visits_avg = visits_total / days[m
+ [m
+[31m-# Calculate week-over-week change[m
+[31m-# WICHTIG: Vergleiche immer die letzten 7 Tage mit den 7 Tagen davor[m
+[31m-# (unabhängig vom ausgewählten Zeitraum)[m
+[31m-week_end = end_date[m
+[31m-week_start = week_end - timedelta(days=6)  # Letzte 7 Tage[m
+[31m-[m
+[31m-prev_week_end = week_start - timedelta(days=1)  # Tag vor der aktuellen Woche[m
+[31m-prev_week_start = prev_week_end - timedelta(days=6)  # 7 Tage davor[m
+[31m-[m
+[31m-# Aktuelle Woche (letzte 7 Tage)[m
+[31m-df_current_week = df[[m
+[31m-    (df["datum"].dt.date >= week_start) & [m
+[31m-    (df["datum"].dt.date <= week_end) &[m
+[31m-    (df["brand"].isin(selected_brands))[m
+[32m+[m[32m# Calculate period-over-period change[m
+[32m+[m[32m# WICHTIG: Vergleiche den gleichen Zeitraum (Anzahl Tage) mit dem Zeitraum davor[m
+[32m+[m[32m# UND wende die gleichen Filter (brands + metrics) an für Konsistenz[m
+[32m+[m[32mselected_days = (end_date - start_date).days + 1  # +1 da inklusive[m
+[32m+[m
+[32m+[m[32m# Vorheriger Zeitraum (gleiche Länge wie ausgewählter Zeitraum)[m
+[32m+[m[32mprev_end = start_date - timedelta(days=1)  # Tag vor dem Starttag[m
+[32m+[m[32mprev_start = prev_end - timedelta(days=selected_days - 1)  # Gleiche Anzahl Tage[m
+[32m+[m
+[32m+[m[32m# Filter für Vorperiode: gleiche Brands UND gleiche Metriken wie Hauptauswahl[m
+[32m+[m[32mdf_prev = df[[m
+[32m+[m[32m    (df["datum"].dt.date >= prev_start) &[m[41m [m
+[32m+[m[32m    (df["datum"].dt.date <= prev_end) &[m
+[32m+[m[32m    (df["brand"].isin(selected_brands)) &[m
+[32m+[m[32m    (df["metrik"].isin(selected_metrics))  # Bug 2 Fix: Metrik-Filter hinzugefügt[m
+ ][m
+[31m-pi_current_week = df_current_week[df_current_week["metrik"] == "Page Impressions"]["wert"].sum()[m
+[31m-visits_current_week = df_current_week[df_current_week["metrik"] == "Visits"]["wert"].sum()[m
+[31m-[m
+[31m-# Vorwoche (7 Tage davor)[m
+[31m-df_prev_week = df[[m
+[31m-    (df["datum"].dt.date >= prev_week_start) & [m
+[31m-    (df["datum"].dt.date <= prev_week_end) &[m
+[31m-    (df["brand"].isin(selected_brands))[m
+[31m-][m
+[31m-pi_prev_week = df_prev_week[df_prev_week["metrik"] == "Page Impressions"]["wert"].sum()[m
+[31m-visits_prev_week = df_prev_week[df_prev_week["metrik"] == "Visits"]["wert"].sum()[m
+[32m+[m[32mpi_prev = df_prev[df_prev["metrik"] == "Page Impressions"]["wert"].sum()[m
+[32m+[m[32mvisits_prev = df_prev[df_prev["metrik"] == "Visits"]["wert"].sum()[m
+ [m
+[31m-pi_change = ((pi_current_week - pi_prev_week) / pi_prev_week * 100) if pi_prev_week > 0 else 0[m
+[31m-visits_change = ((visits_current_week - visits_prev_week) / visits_prev_week * 100) if visits_prev_week > 0 else 0[m
+[32m+[m[32mpi_change = ((pi_total - pi_prev) / pi_prev * 100) if pi_prev > 0 else 0[m
+[32m+[m[32mvisits_change = ((visits_total - visits_prev) / visits_prev * 100) if visits_prev > 0 else 0[m
+ [m
+ with col1:[m
+     st.metric([m
+         label="Page Impressions (Gesamt)",[m
+         value=f"{pi_total:,.0f}".replace(",", "."),[m
+[31m-        delta=f"{pi_change:+.1f}% vs. Vorwoche"[m
+[32m+[m[32m        delta=f"{pi_change:+.1f}% vs. Vorperiode"[m
+     )[m
+ [m
+ with col2:[m
+     st.metric([m
+         label="Visits (Gesamt)",[m
+         value=f"{visits_total:,.0f}".replace(",", "."),[m
+[31m-        delta=f"{visits_change:+.1f}% vs. Vorwoche"[m
+[32m+[m[32m        delta=f"{visits_change:+.1f}% vs. Vorperiode"[m
+     )[m
+ [m
+ with col3:[m
