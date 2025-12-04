@@ -584,6 +584,23 @@ def run_weekly_report():
     prev_days_vol = len(prev_week["VOL"]["Page Impressions"])
     prev_days_vienna = len(prev_week["Vienna"]["Page Impressions"])
     
+    # DEBUG: Detaillierte Datenanalyse
+    print(f"\n   🔍 DEBUG - Datenanalyse:")
+    print(f"   Zeitraum aktuell: {week_start} bis {today} ({current_days_vol} Tage VOL, {current_days_vienna} Vienna)")
+    print(f"   Zeitraum Vorwoche: {prev_week_start} bis {week_start - timedelta(days=1)} ({prev_days_vol} Tage VOL, {prev_days_vienna} Vienna)")
+    
+    print(f"\n   VOL Page Impressions:")
+    print(f"   - Aktuelle Woche: {current_week['VOL']['Page Impressions']}")
+    print(f"   - Vorwoche: {prev_week['VOL']['Page Impressions']}")
+    print(f"   - Summe aktuell: {sum(current_week['VOL']['Page Impressions']):,}")
+    print(f"   - Summe Vorwoche: {sum(prev_week['VOL']['Page Impressions']):,}")
+    
+    print(f"\n   VOL Visits:")
+    print(f"   - Aktuelle Woche: {current_week['VOL']['Visits']}")
+    print(f"   - Vorwoche: {prev_week['VOL']['Visits']}")
+    print(f"   - Summe aktuell: {sum(current_week['VOL']['Visits']):,}")
+    print(f"   - Summe Vorwoche: {sum(prev_week['VOL']['Visits']):,}")
+    
     data = {
         "period": f"{week_start.strftime('%d.%m.')} - {today.strftime('%d.%m.%Y')}",
         "vol_pi_week": sum(current_week["VOL"]["Page Impressions"]),
