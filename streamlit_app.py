@@ -220,21 +220,51 @@ if comparison_mode == "Vorperiode (automatisch)":
 
 elif comparison_mode == "Benutzerdefiniert":
     # Manual comparison period selection
-    col_cmp1, col_cmp2 = st.sidebar.columns(2)
-    prev_start = col_cmp1.date_input("Vergleich Von", 
-                                      value=max(start_date - timedelta(days=selected_days), data_min_date),
-                                      min_value=data_min_date, 
-                                      max_value=start_date - timedelta(days=1),
-                                      key="cmp_start")
-    prev_end = col_cmp2.date_input("Vergleich Bis", 
-                                    value=start_date - timedelta(days=1),
-                                    min_value=data_min_date, 
-                                    max_value=start_date - timedelta(days=1),
-                                    key="cmp_end")
-    comparison_fully_available = True
-    cmp_days = (prev_end - prev_start).days + 1
-    if cmp_days != selected_days:
-        st.sidebar.warning(f"⚠️ Vergleichszeitraum ({cmp_days} Tage) ≠ Messzeitraum ({selected_days} Tage)")
+    # Prüfe ob überhaupt Vergleichsdaten VOR dem Messzeitraum existieren
+    comparison_max_date = start_date - timedelta(days=1)  # Spätestes Vergleichsdatum = 1 Tag vor Messzeitraum
+    
+    if comparison_max_date >= data_min_date:
+        # Es gibt mindestens 1 Tag für Vergleich
+        col_cmp1, col_cmp2 = st.sidebar.columns(2)
+        
+        # Berechne sinnvolle Default-Werte (innerhalb des gültigen Bereichs)
+        default_cmp_start = max(start_date - timedelta(days=selected_days), data_min_date)
+        default_cmp_end = comparison_max_date
+        
+        # Stelle sicher, dass default_cmp_start nicht nach default_cmp_end liegt
+        if default_cmp_start > default_cmp_end:
+            default_cmp_start = data_min_date
+        
+        prev_start = col_cmp1.date_input("Vergleich Von", 
+                                          value=default_cmp_start,
+                                          min_value=data_min_date, 
+                                          max_value=comparison_max_date,
+                                          key="cmp_start")
+        prev_end = col_cmp2.date_input("Vergleich Bis", 
+                                        value=default_cmp_end,
+                                        min_value=data_min_date, 
+                                        max_value=comparison_max_date,
+                                        key="cmp_end")
+        
+        # Validierung: prev_start sollte <= prev_end sein
+        if prev_start > prev_end:
+            st.sidebar.error("❌ 'Vergleich Von' muss vor 'Vergleich Bis' liegen!")
+            prev_start = None
+            prev_end = None
+            comparison_fully_available = False
+        else:
+            comparison_fully_available = True
+            cmp_days = (prev_end - prev_start).days + 1
+            if cmp_days != selected_days:
+                st.sidebar.warning(f"⚠️ Vergleichszeitraum ({cmp_days} Tage) ≠ Messzeitraum ({selected_days} Tage)")
+            else:
+                st.sidebar.success(f"✅ Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
+    else:
+        # Kein gültiger Vergleichszeitraum möglich (Messzeitraum beginnt am ersten verfügbaren Tag)
+        st.sidebar.error("❌ Keine Vergleichsdaten vor dem Messzeitraum verfügbar.\nWähle einen späteren Starttermin für den Messzeitraum.")
+        prev_start = None
+        prev_end = None
+        comparison_fully_available = False
 else:
     # No comparison
     prev_start = None
