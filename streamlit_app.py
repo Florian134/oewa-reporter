@@ -211,24 +211,41 @@ df_prev = df[
     (df["brand"].isin(selected_brands)) &
     (df["metrik"].isin(selected_metrics))
 ]
+
+# Prüfe ob genügend Vergleichsdaten vorhanden sind (mindestens 50% der erwarteten Tage)
+prev_days_with_data = df_prev["datum"].dt.date.nunique()
+has_enough_prev_data = prev_days_with_data >= (selected_days * 0.5)
+
 pi_prev = df_prev[df_prev["metrik"] == "Page Impressions"]["wert"].sum()
 visits_prev = df_prev[df_prev["metrik"] == "Visits"]["wert"].sum()
 
-pi_change = ((pi_total - pi_prev) / pi_prev * 100) if pi_prev > 0 else 0
-visits_change = ((visits_total - visits_prev) / visits_prev * 100) if visits_prev > 0 else 0
+# Nur berechnen wenn genügend Vergleichsdaten vorhanden
+if has_enough_prev_data and pi_prev > 0:
+    pi_change = ((pi_total - pi_prev) / pi_prev * 100)
+    pi_delta_text = f"{pi_change:+.1f}% vs. Vorperiode"
+else:
+    pi_change = None
+    pi_delta_text = "Keine Vergleichsdaten"
+
+if has_enough_prev_data and visits_prev > 0:
+    visits_change = ((visits_total - visits_prev) / visits_prev * 100)
+    visits_delta_text = f"{visits_change:+.1f}% vs. Vorperiode"
+else:
+    visits_change = None
+    visits_delta_text = "Keine Vergleichsdaten"
 
 with col1:
     st.metric(
         label="Page Impressions (Gesamt)",
         value=f"{pi_total:,.0f}".replace(",", "."),
-        delta=f"{pi_change:+.1f}% vs. Vorperiode"
+        delta=pi_delta_text if pi_change is None else f"{pi_change:+.1f}% vs. Vorperiode"
     )
 
 with col2:
     st.metric(
         label="Visits (Gesamt)",
         value=f"{visits_total:,.0f}".replace(",", "."),
-        delta=f"{visits_change:+.1f}% vs. Vorperiode"
+        delta=visits_delta_text if visits_change is None else f"{visits_change:+.1f}% vs. Vorperiode"
     )
 
 with col3:
