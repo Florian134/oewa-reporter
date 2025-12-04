@@ -316,44 +316,72 @@ def generate_gpt_summary(data: Dict) -> str:
     data_quality = data.get('data_quality_note', '')
     data_quality_section = f"\nDATENQUALITÄT:\n{data_quality}\n" if data_quality else ""
     
-    prompt = f"""Du bist ein Web-Analytics-Experte für österreichische Medienunternehmen.
-Analysiere die folgenden ÖWA-Daten für VOL.AT und VIENNA.AT und erstelle eine kurze, professionelle Zusammenfassung auf Deutsch.
+    # Aktuelles Datum für Kontext (Saisonalität, Feiertage)
+    from datetime import datetime
+    current_month = datetime.now().strftime("%B")
+    current_week = datetime.now().isocalendar()[1]
+    
+    # Beste Performance identifizieren für Highlight
+    changes = {
+        "VOL.AT Page Impressions": data.get('vol_pi_change'),
+        "VOL.AT Visits": data.get('vol_visits_change'),
+        "VIENNA.AT Page Impressions": data.get('vienna_pi_change'),
+        "VIENNA.AT Visits": data.get('vienna_visits_change')
+    }
+    valid_changes = {k: v for k, v in changes.items() if v is not None}
+    best_performer = max(valid_changes.items(), key=lambda x: x[1]) if valid_changes else ("N/A", 0)
+    worst_performer = min(valid_changes.items(), key=lambda x: x[1]) if valid_changes else ("N/A", 0)
+    
+    prompt = f"""Du bist ein erfahrener Web-Analytics-Experte und Kommunikationsprofi für österreichische Medienunternehmen.
+Deine Aufgabe: Erstelle einen EXECUTIVE SUMMARY für die Geschäftsleitung - professionell, aber lebendig und handlungsorientiert.
 
-BERICHTSZEITRAUM: {data.get('period', 'N/A')}
-Datenpunkte aktuelle Woche: {data.get('current_days', 'N/A')} Tage
-Datenpunkte Vorwoche: {data.get('prev_days', 'N/A')} Tage
+═══════════════════════════════════════════════════════════════
+📅 BERICHTSZEITRAUM: {data.get('period', 'N/A')} (KW {current_week})
+📊 Datenbasis: {data.get('current_days', 'N/A')} Tage aktuell, {data.get('prev_days', 'N/A')} Tage Vorwoche
 {data_quality_section}
-VOL.AT:
-- Page Impressions gesamt: {data.get('vol_pi_week', 0):,}
-- Durchschnitt pro Tag: {data.get('vol_pi_avg', 0):,.0f}
-- Visits gesamt: {data.get('vol_visits_week', 0):,}
-- Durchschnitt pro Tag: {data.get('vol_visits_avg', 0):,.0f}
-- Veränderung vs. Vorwoche PI: {vol_pi_change}
-- Veränderung vs. Vorwoche Visits: {vol_visits_change}
+═══════════════════════════════════════════════════════════════
 
-VIENNA.AT:
-- Page Impressions gesamt: {data.get('vienna_pi_week', 0):,}
-- Durchschnitt pro Tag: {data.get('vienna_pi_avg', 0):,.0f}
-- Visits gesamt: {data.get('vienna_visits_week', 0):,}
-- Durchschnitt pro Tag: {data.get('vienna_visits_avg', 0):,.0f}
-- Veränderung vs. Vorwoche PI: {vienna_pi_change}
-- Veränderung vs. Vorwoche Visits: {vienna_visits_change}
+🔵 VOL.AT (Vorarlberg Online):
+   • Page Impressions: {data.get('vol_pi_week', 0):,} gesamt ({data.get('vol_pi_avg', 0):,.0f}/Tag)
+   • Visits: {data.get('vol_visits_week', 0):,} gesamt ({data.get('vol_visits_avg', 0):,.0f}/Tag)
+   • Veränderung PI: {vol_pi_change} | Visits: {vol_visits_change}
 
-ANOMALIEN (basierend auf Tageswert-Analyse):
-{data.get('anomalies_text', 'Keine Anomalien erkannt.')}
+🟣 VIENNA.AT (Wien Online):
+   • Page Impressions: {data.get('vienna_pi_week', 0):,} gesamt ({data.get('vienna_pi_avg', 0):,.0f}/Tag)
+   • Visits: {data.get('vienna_visits_week', 0):,} gesamt ({data.get('vienna_visits_avg', 0):,.0f}/Tag)
+   • Veränderung PI: {vienna_pi_change} | Visits: {vienna_visits_change}
 
-WICHTIGE HINWEISE FÜR DIE ANALYSE:
-- Fokussiere auf die DURCHSCHNITTSWERTE pro Tag, nicht nur auf die Gesamtsummen
-- Falls Vorwochenvergleiche "nicht verfügbar" sind, liegt das an unvollständigen historischen Daten - erwähne das
-- Anomalien beziehen sich auf den LETZTEN TAGESWERT im Vergleich zum historischen Median
-- Sei vorsichtig bei der Interpretation von extremen Veränderungen (>50%)
+🏆 TOP-PERFORMER: {best_performer[0]} mit {best_performer[1]:+.1f}%
+📉 BEOBACHTEN: {worst_performer[0]} mit {worst_performer[1]:+.1f}%
 
-Erstelle eine Zusammenfassung mit:
-1. Überblick der Wochenperformance mit Fokus auf Tagesdurchschnitte (2-3 Sätze)
-2. Wichtige Auffälligkeiten oder Anomalien (falls vorhanden)
-3. Kurze Einschätzung
+⚠️ ANOMALIEN:
+{data.get('anomalies_text', 'Keine statistischen Anomalien erkannt.')}
 
-Halte die Zusammenfassung prägnant (max. 150 Wörter). Vermeide Spekulationen über Ursachen.
+═══════════════════════════════════════════════════════════════
+
+DEINE AUFGABE - Erstelle eine Zusammenfassung mit EXAKT dieser Struktur:
+
+**📈 HIGHLIGHT DER WOCHE**
+[1 Satz: Was ist die wichtigste positive Nachricht? Beginne mit einer Zahl oder einem starken Statement.]
+
+**🎯 ZUSAMMENFASSUNG**
+[2-3 Sätze: Kernbotschaft der Wochenperformance. Vergleiche beide Properties. Nutze konkrete Zahlen.]
+
+**🔍 KONTEXT & EINORDNUNG**
+[1-2 Sätze: Ordne die Zahlen ein. Berücksichtige: Dezember = Adventzeit, erhöhter Medienkonsum. 
+Wochenenden typischerweise schwächer. Feiertage können Ausreißer verursachen.]
+
+**✅ BEWERTUNG**
+[1 Satz: Gesamteinschätzung - ist die Entwicklung positiv/stabil/besorgniserregend?]
+
+STILRICHTLINIEN:
+- Schreibe wie ein Analyst, der vor dem Vorstand präsentiert
+- Beginne mit dem Wichtigsten (Inverted Pyramid)
+- Nutze aktive Sprache: "VIENNA.AT legte um 28% zu" statt "Es wurde ein Wachstum von 28% verzeichnet"
+- Bei positiven Zahlen: enthusiastisch aber professionell
+- Bei negativen Zahlen: sachlich, lösungsorientiert
+- Keine leeren Floskeln wie "es bleibt abzuwarten"
+- Max. 180 Wörter insgesamt
 """
 
     try:
