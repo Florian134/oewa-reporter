@@ -51,7 +51,7 @@ let response = await fetch(
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: 'token=glptt-5tJWnqVhM7Qb5o3xTPT9&ref=main&variables[JOB_TYPE]=alert_check'
+        body: 'token=glptt-XXXXXXXXXXXXX&ref=main&variables[JOB_TYPE]=alert_check'
     }
 );
 
@@ -73,7 +73,7 @@ let ingestResponse = await fetch(
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'token=glptt-5tJWnqVhM7Qb5o3xTPT9&ref=main'
+        body: 'token=glptt-XXXXXXXXXXXXX&ref=main'
     }
 );
 console.log('Daily Ingest gestartet');
@@ -86,7 +86,7 @@ let alertResponse = await fetch(
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'token=glptt-5tJWnqVhM7Qb5o3xTPT9&ref=main&variables[JOB_TYPE]=alert_check'
+        body: 'token=glptt-XXXXXXXXXXXXX&ref=main&variables[JOB_TYPE]=alert_check'
     }
 );
 console.log('Alert Check gestartet');

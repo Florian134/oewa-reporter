@@ -302,7 +302,7 @@ let response = await fetch(
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'token=glptt-5tJWnqVhM7Qb5o3xTPT9&ref=main&variables[JOB_TYPE]=alert_check'
+        body: 'token=glptt-XXXXXXXXXXXXX&ref=main&variables[JOB_TYPE]=alert_check'
     }
 );
 console.log('Alert Check gestartet:', await response.json());
@@ -317,7 +317,7 @@ let response = await fetch(
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'token=glptt-5tJWnqVhM7Qb5o3xTPT9&ref=main&variables[JOB_TYPE]=test_notifications'
+        body: 'token=glptt-XXXXXXXXXXXXX&ref=main&variables[JOB_TYPE]=test_notifications'
     }
 );
 console.log('Notification Test gestartet:', await response.json());

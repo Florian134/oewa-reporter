@@ -192,7 +192,7 @@ df_prev = df[
 ```javascript
 // ÖWA Reporter - Weekly Report Trigger
 const GITLAB_PROJECT_ID = "76833234";
-const GITLAB_TRIGGER_TOKEN = "glptt-5tJWnqVhM7Qb5o3xTPT9";
+const GITLAB_TRIGGER_TOKEN = "glptt-XXXXXXXXXXXXX";  // Token hier einfügen
 const GITLAB_REF = "weekly-trigger";  // Dedizierter Branch
 
 let response = await fetch(
