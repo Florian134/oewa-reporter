@@ -566,13 +566,19 @@ with tab2:
 # TAB 3: ZEITREIHEN
 # -----------------------------------------------------------------------------
 with tab3:
-    st.subheader("📈 Zeitreihen-Analyse")
+    st.subheader("📈 Zeitreihen-Analyse nach Property")
     
-    # Daten pro Tag aggregieren (nur Datum, ohne Uhrzeit)
+    # Farben für Properties
+    property_colors = {
+        "VOL": {"line": "#3B82F6", "fill": "#93C5FD"},      # Blau
+        "Vienna": {"line": "#8B5CF6", "fill": "#C4B5FD"}    # Lila
+    }
+    
+    # Daten pro Tag UND Brand aggregieren
     daily = df_filtered.copy()
-    daily["datum_tag"] = daily["datum"].dt.date  # Nur Datum ohne Uhrzeit
-    daily = daily.groupby(["datum_tag", "metrik"])["wert"].sum().reset_index()
-    daily["datum_tag"] = pd.to_datetime(daily["datum_tag"])  # Zurück zu datetime für Plotly
+    daily["datum_tag"] = daily["datum"].dt.date
+    daily = daily.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
+    daily["datum_tag"] = pd.to_datetime(daily["datum_tag"])
     
     if daily.empty:
         st.info("Keine Daten für den ausgewählten Zeitraum.")
@@ -584,40 +590,72 @@ with tab3:
                 st.info(f"Keine {metrik} Daten verfügbar.")
                 continue
             
-            metric_data = metric_data.copy()
-            metric_data["7d_avg"] = metric_data["wert"].rolling(window=7, min_periods=1).mean()
-            
-            # Formatiertes Datum für X-Achse (dd.mm.)
-            metric_data["datum_label"] = metric_data["datum_tag"].dt.strftime("%d.%m.")
-            
             fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=metric_data["datum_tag"],
-                y=metric_data["wert"],
-                mode="lines+markers",  # Punkte hinzufügen für bessere Sichtbarkeit
-                name="Tageswert",
-                line=dict(color="#93C5FD" if metrik == "Page Impressions" else "#FDBA74"),
-                marker=dict(size=6)
-            ))
-            fig.add_trace(go.Scatter(
-                x=metric_data["datum_tag"],
-                y=metric_data["7d_avg"],
-                mode="lines",
-                name="7-Tage Ø",
-                line=dict(color="#2563EB" if metrik == "Page Impressions" else "#EA580C", width=3)
-            ))
+            
+            # Für jede Property (Brand) eine eigene Linie
+            for brand in ["VOL", "Vienna"]:
+                brand_data = metric_data[metric_data["brand"] == brand].copy()
+                
+                if brand_data.empty:
+                    continue
+                
+                # 7-Tage-Durchschnitt pro Brand berechnen
+                brand_data = brand_data.sort_values("datum_tag")
+                brand_data["7d_avg"] = brand_data["wert"].rolling(window=7, min_periods=1).mean()
+                
+                colors = property_colors.get(brand, {"line": "#666", "fill": "#999"})
+                
+                # Tageswert (helle Linie mit Punkten)
+                fig.add_trace(go.Scatter(
+                    x=brand_data["datum_tag"],
+                    y=brand_data["wert"],
+                    mode="lines+markers",
+                    name=f"{brand} Tageswert",
+                    line=dict(color=colors["fill"], width=1),
+                    marker=dict(size=5),
+                    legendgroup=brand,
+                    opacity=0.7
+                ))
+                
+                # 7-Tage-Durchschnitt (kräftige Linie)
+                fig.add_trace(go.Scatter(
+                    x=brand_data["datum_tag"],
+                    y=brand_data["7d_avg"],
+                    mode="lines",
+                    name=f"{brand} 7-Tage Ø",
+                    line=dict(color=colors["line"], width=3),
+                    legendgroup=brand
+                ))
+            
             fig.update_layout(
-                title=f"{metrik} - Trend mit 7-Tage-Durchschnitt",
+                title=f"{metrik} - Trend nach Property (mit 7-Tage-Durchschnitt)",
                 yaxis_tickformat=",",
                 xaxis=dict(
-                    tickformat="%d.%m.",  # Nur Tag.Monat anzeigen
-                    dtick="D1",  # Ein Tick pro Tag
+                    tickformat="%d.%m.",
+                    dtick="D1",
                     tickangle=-45
                 ),
                 xaxis_title="Datum",
-                yaxis_title="Wert"
+                yaxis_title="Wert",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                hovermode="x unified"
             )
             st.plotly_chart(fig, use_container_width=True)
+        
+        # Erkenntnisse-Box
+        st.markdown("---")
+        st.markdown("### 📊 Legende")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("🔵 **VOL.AT** - Vorarlberg Online")
+        with col2:
+            st.markdown("🟣 **VIENNA.AT** - Wien Online")
 
 # =============================================================================
 # FOOTER
