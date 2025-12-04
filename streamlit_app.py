@@ -134,31 +134,105 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
+# LOAD DATA FIRST (to determine available date range)
+# =============================================================================
+df = load_data_from_airtable()
+
+# Determine available data range
+if not df.empty:
+    data_min_date = df["datum"].min().date()
+    data_max_date = df["datum"].max().date()
+    data_days_available = (data_max_date - data_min_date).days + 1
+else:
+    data_min_date = date.today() - timedelta(days=30)
+    data_max_date = date.today()
+    data_days_available = 0
+
+# =============================================================================
 # SIDEBAR FILTERS
 # =============================================================================
 st.sidebar.header("⚙️ Filter")
 
-# Date range
-col1, col2 = st.sidebar.columns(2)
-default_end = date.today()
-default_start = default_end - timedelta(days=30)
+# Show available data range info
+st.sidebar.info(f"📅 **Verfügbare Daten:**\n{data_min_date.strftime('%d.%m.%Y')} - {data_max_date.strftime('%d.%m.%Y')}\n({data_days_available} Tage)")
 
-start_date = col1.date_input("Von", default_start)
-end_date = col2.date_input("Bis", default_end)
+# Date range - Messzeitraum
+st.sidebar.subheader("📊 Messzeitraum")
+col1, col2 = st.sidebar.columns(2)
+default_end = min(date.today(), data_max_date)
+default_start = max(default_end - timedelta(days=30), data_min_date)
+
+start_date = col1.date_input("Von", default_start, min_value=data_min_date, max_value=data_max_date)
+end_date = col2.date_input("Bis", default_end, min_value=data_min_date, max_value=data_max_date)
 
 # Quick select
-if st.sidebar.button("Letzte 7 Tage"):
-    start_date = date.today() - timedelta(days=7)
-    end_date = date.today()
+col_btn1, col_btn2 = st.sidebar.columns(2)
+if col_btn1.button("Letzte 7 Tage"):
+    start_date = max(date.today() - timedelta(days=7), data_min_date)
+    end_date = min(date.today(), data_max_date)
 
-if st.sidebar.button("Letzte 30 Tage"):
-    start_date = date.today() - timedelta(days=30)
-    end_date = date.today()
+if col_btn2.button("Letzte 30 Tage"):
+    start_date = max(date.today() - timedelta(days=30), data_min_date)
+    end_date = min(date.today(), data_max_date)
 
 # =============================================================================
-# LOAD DATA
+# COMPARISON PERIOD SELECTION (wie Google Analytics)
 # =============================================================================
-df = load_data_from_airtable()
+st.sidebar.subheader("🔄 Vergleichszeitraum")
+
+selected_days = (end_date - start_date).days + 1
+
+# Comparison mode selection
+comparison_mode = st.sidebar.radio(
+    "Vergleichsmodus",
+    ["Vorperiode (automatisch)", "Benutzerdefiniert", "Kein Vergleich"],
+    index=0,
+    help="Vorperiode: Gleich langer Zeitraum direkt vor der Auswahl"
+)
+
+if comparison_mode == "Vorperiode (automatisch)":
+    # Automatische Vorperiode = gleich langer Zeitraum direkt davor
+    prev_end = start_date - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=selected_days - 1)
+    
+    # Check if comparison period is within available data
+    if prev_start >= data_min_date:
+        comparison_fully_available = True
+        st.sidebar.success(f"✅ Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
+    elif prev_end >= data_min_date:
+        comparison_fully_available = False
+        actual_prev_start = max(prev_start, data_min_date)
+        actual_days = (prev_end - actual_prev_start).days + 1
+        st.sidebar.warning(f"⚠️ Nur {actual_days}/{selected_days} Tage verfügbar:\n{actual_prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
+        prev_start = actual_prev_start
+    else:
+        comparison_fully_available = False
+        prev_start = None
+        prev_end = None
+        st.sidebar.error("❌ Keine Vergleichsdaten verfügbar")
+
+elif comparison_mode == "Benutzerdefiniert":
+    # Manual comparison period selection
+    col_cmp1, col_cmp2 = st.sidebar.columns(2)
+    prev_start = col_cmp1.date_input("Vergleich Von", 
+                                      value=max(start_date - timedelta(days=selected_days), data_min_date),
+                                      min_value=data_min_date, 
+                                      max_value=start_date - timedelta(days=1),
+                                      key="cmp_start")
+    prev_end = col_cmp2.date_input("Vergleich Bis", 
+                                    value=start_date - timedelta(days=1),
+                                    min_value=data_min_date, 
+                                    max_value=start_date - timedelta(days=1),
+                                    key="cmp_end")
+    comparison_fully_available = True
+    cmp_days = (prev_end - prev_start).days + 1
+    if cmp_days != selected_days:
+        st.sidebar.warning(f"⚠️ Vergleichszeitraum ({cmp_days} Tage) ≠ Messzeitraum ({selected_days} Tage)")
+else:
+    # No comparison
+    prev_start = None
+    prev_end = None
+    comparison_fully_available = False
 
 if df.empty:
     st.warning("Keine Daten verfügbar. Bitte prüfe die Airtable-Konfiguration.")
@@ -196,56 +270,66 @@ days = (end_date - start_date).days or 1
 pi_avg = pi_total / days
 visits_avg = visits_total / days
 
-# Calculate period-over-period change
-# FIX: Vergleiche gleich lange Zeiträume + gleiche Filter (brands & metrics)
-selected_days = (end_date - start_date).days + 1  # Anzahl Tage inkl. beider Enden
-
-# Vorperiode = gleich langer Zeitraum direkt vor der Auswahl
-prev_end = start_date - timedelta(days=1)
-prev_start = prev_end - timedelta(days=selected_days - 1)
-
-# Gleiche Filter wie Hauptauswahl (brands UND metrics)
-df_prev = df[
-    (df["datum"].dt.date >= prev_start) & 
-    (df["datum"].dt.date <= prev_end) &
-    (df["brand"].isin(selected_brands)) &
-    (df["metrik"].isin(selected_metrics))
-]
-
-# Prüfe ob genügend Vergleichsdaten vorhanden sind (mindestens 50% der erwarteten Tage)
-prev_days_with_data = df_prev["datum"].dt.date.nunique()
-has_enough_prev_data = prev_days_with_data >= (selected_days * 0.5)
-
-pi_prev = df_prev[df_prev["metrik"] == "Page Impressions"]["wert"].sum()
-visits_prev = df_prev[df_prev["metrik"] == "Visits"]["wert"].sum()
-
-# Nur berechnen wenn genügend Vergleichsdaten vorhanden
-if has_enough_prev_data and pi_prev > 0:
-    pi_change = ((pi_total - pi_prev) / pi_prev * 100)
-    pi_delta_text = f"{pi_change:+.1f}% vs. Vorperiode"
+# Calculate period-over-period change using the comparison period from sidebar
+if prev_start is not None and prev_end is not None:
+    # Gleiche Filter wie Hauptauswahl (brands UND metrics)
+    df_prev = df[
+        (df["datum"].dt.date >= prev_start) & 
+        (df["datum"].dt.date <= prev_end) &
+        (df["brand"].isin(selected_brands)) &
+        (df["metrik"].isin(selected_metrics))
+    ]
+    
+    # Berechne Vergleichsdaten
+    prev_days_with_data = df_prev["datum"].dt.date.nunique()
+    comparison_days = (prev_end - prev_start).days + 1
+    
+    pi_prev = df_prev[df_prev["metrik"] == "Page Impressions"]["wert"].sum()
+    visits_prev = df_prev[df_prev["metrik"] == "Visits"]["wert"].sum()
+    
+    # Vergleichstext basierend auf Modus
+    if comparison_mode == "Benutzerdefiniert":
+        period_label = f"vs. {prev_start.strftime('%d.%m.')}-{prev_end.strftime('%d.%m.')}"
+    else:
+        period_label = "vs. Vorperiode"
+    
+    # Zusätzlicher Hinweis bei unvollständigen Daten
+    if prev_days_with_data < comparison_days:
+        period_label += f" ({prev_days_with_data}d)"
+    
+    # Berechne Änderungen
+    if pi_prev > 0:
+        pi_change = ((pi_total - pi_prev) / pi_prev * 100)
+        pi_delta_text = f"{pi_change:+.1f}% {period_label}"
+    else:
+        pi_change = None
+        pi_delta_text = "Keine Vergleichsdaten"
+    
+    if visits_prev > 0:
+        visits_change = ((visits_total - visits_prev) / visits_prev * 100)
+        visits_delta_text = f"{visits_change:+.1f}% {period_label}"
+    else:
+        visits_change = None
+        visits_delta_text = "Keine Vergleichsdaten"
 else:
+    # Kein Vergleich ausgewählt
     pi_change = None
-    pi_delta_text = "Keine Vergleichsdaten"
-
-if has_enough_prev_data and visits_prev > 0:
-    visits_change = ((visits_total - visits_prev) / visits_prev * 100)
-    visits_delta_text = f"{visits_change:+.1f}% vs. Vorperiode"
-else:
     visits_change = None
-    visits_delta_text = "Keine Vergleichsdaten"
+    pi_delta_text = None
+    visits_delta_text = None
 
 with col1:
     st.metric(
         label="Page Impressions (Gesamt)",
         value=f"{pi_total:,.0f}".replace(",", "."),
-        delta=pi_delta_text if pi_change is None else f"{pi_change:+.1f}% vs. Vorperiode"
+        delta=pi_delta_text
     )
 
 with col2:
     st.metric(
         label="Visits (Gesamt)",
         value=f"{visits_total:,.0f}".replace(",", "."),
-        delta=visits_delta_text if visits_change is None else f"{visits_change:+.1f}% vs. Vorperiode"
+        delta=visits_delta_text
     )
 
 with col3:
