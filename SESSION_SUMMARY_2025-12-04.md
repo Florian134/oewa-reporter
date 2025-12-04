@@ -1,354 +1,286 @@
-# 📊 ÖWA Reporter - Session Summary
-**Datum:** 04. Dezember 2025  
-**Projekt:** ÖWA Reporter - Automatisiertes Web Analytics Reporting für VOL.AT & VIENNA.AT
+# ÖWA Reporter - Session Summary
+## Datum: 04. Dezember 2025
 
 ---
 
-## 📋 Inhaltsverzeichnis
+## 📋 Projektübersicht
 
-1. [Ausgangssituation](#ausgangssituation)
-2. [Durchgeführte Arbeiten](#durchgeführte-arbeiten)
-3. [Behobene Probleme](#behobene-probleme)
-4. [Systemarchitektur](#systemarchitektur)
-5. [Datenflüsse](#datenflüsse)
-6. [Code-Änderungen](#code-änderungen)
-7. [Konfiguration](#konfiguration)
-8. [Aktuelle Datenlage](#aktuelle-datenlage)
-9. [Offene Punkte & Empfehlungen](#offene-punkte--empfehlungen)
-
----
-
-## 🎯 Ausgangssituation
-
-### Ursprüngliche Problemstellung
-1. **OpenAI API Key** war ungültig (401 Error)
-2. **Streamlit Dashboard** zeigte absurde Prozentwerte (+3179.9% Steigerung)
-3. **Weekly Report** zeigte falsche Veränderungswerte (+82.9% statt -6.4%)
-4. **Duplikate in Airtable** verursachten fehlerhafte Berechnungen
-5. **Kaleido** (für Diagramm-Export) benötigte Chrome im CI
-
-### Bestehende Infrastruktur
-- INFOnline ÖWA API für Datenabfrage
-- Airtable als Datenbank und Trigger-Mechanismus
-- GitLab CI/CD für Job-Ausführung
-- GitHub als Source für Streamlit Cloud
-- MS Teams für Benachrichtigungen
-- OpenAI GPT für KI-Analysen
-
----
-
-## ✅ Durchgeführte Arbeiten
-
-### 1. OpenAI API Key Validierung
-- Neuer API Key getestet und für funktionsfähig befunden
-- Alle GPT-Integrationen funktionieren
-
-### 2. Streamlit Dashboard Fixes
-
-#### Problem: Absurde Prozentwerte
-**Ursache:** Vergleich unterschiedlich langer Zeiträume + fehlender Metrik-Filter
-
-**Lösung:**
-```python
-# Vorher: Verglich 30 Tage mit 7 Tagen
-# Nachher: Vergleicht gleich lange Zeiträume
-selected_days = (end_date - start_date).days + 1
-prev_end = start_date - timedelta(days=1)
-prev_start = prev_end - timedelta(days=selected_days - 1)
-```
-
-#### Neue Features:
-- **Google Analytics-Style Vergleichszeitraum-Auswahl**
-  - Automatische Vorperiode
-  - Benutzerdefinierter Vergleichszeitraum
-  - Kein Vergleich
-- **Wochentags-Analyse** (ersetzt irreführenden "Täglicher Trend")
-  - Gruppierte Balkendiagramme VOL vs Vienna
-  - Durchschnittliche PI/Visits pro Wochentag
-- **Session State** für Quick-Select Buttons
-
-### 3. Weekly Report mit Diagrammen
-
-#### Implementiert:
-- **Plotly-Diagramme** für Wochentags-Analyse und 7-Tage-Trend
-- **Kaleido 0.2.1** für PNG-Export (mit eigenem Chromium)
-- **Imgur-Upload** für öffentliche Bild-URLs
-- **Verbesserte Teams-MessageCard** mit eingebetteten Bildern
-
-#### Fix: Kaleido Chrome-Problem
-```yaml
-# .gitlab-ci.yml
-pip install "kaleido==0.2.1"  # Version mit eigenem Chromium
-```
-
-### 4. Duplikat-Problem behoben
-
-#### Problem identifiziert:
-- `daily_ingest.py` hatte **keine Duplikat-Prüfung**
-- Mehrfache Ausführungen erstellten doppelte Einträge
-- Weekly Report zählte 11 Tage statt 7 → +82.9% statt -6.4%
-
-#### Lösung:
-```python
-# Neue Funktion in daily_ingest.py
-def check_existing_records(target_date: date) -> set:
-    """Prüft welche Records bereits existieren"""
-    # Gibt Set von Unique Keys zurück
-    
-def save_to_airtable(records: list, existing_keys: set = None):
-    """Speichert nur NEUE Records (überspringt Duplikate)"""
-```
-
-### 5. Airtable Bereinigung & Backfill
-
-- **Alle Daten gelöscht** (manuell durch User)
-- **90-Tage Backfill** durchgeführt (05.09.2025 - 03.12.2025)
-- **360 Records** ohne Duplikate eingefügt
-
-### 6. GitLab CI/CD Anpassungen
-
-#### Neuer Branch: `weekly-trigger`
-- Löst das Problem, dass Trigger-Tokens keine Variablen setzen können
-- `weekly_report` Job läuft nur auf diesem Branch
-
-```yaml
-weekly_report:
-  rules:
-    - if: $JOB_TYPE == "weekly"
-    - if: $CI_COMMIT_REF_NAME == "weekly-trigger" && $CI_PIPELINE_SOURCE == "trigger"
-```
-
-#### Fix: Daily Ingest auf weekly-trigger blockiert
-```yaml
-daily_ingest:
-  rules:
-    - if: $CI_COMMIT_REF_NAME == "weekly-trigger"
-      when: never
-```
-
----
-
-## 🐛 Behobene Probleme
-
-| Problem | Ursache | Lösung | Status |
-|---------|---------|--------|--------|
-| OpenAI 401 | Ungültiger API Key | Neuer Key | ✅ |
-| Streamlit +3179% | Unterschiedliche Zeiträume verglichen | Gleich lange Perioden | ✅ |
-| Weekly Report +82.9% | Duplikate in Airtable | Duplikat-Prüfung + Cleanup | ✅ |
-| Kaleido Chrome Error | Kaleido 1.x braucht Chrome | Kaleido 0.2.1 verwenden | ✅ |
-| GitLab Variable Error | Trigger-Token kann keine Vars setzen | `weekly-trigger` Branch | ✅ |
-| Daily Ingest Duplikate | Keine Prüfung vor Insert | `check_existing_records()` | ✅ |
+Das **ÖWA Reporter System** ist ein automatisiertes Web-Analytics-Reporting-Tool für **VOL.AT** und **VIENNA.AT**, das Daten von der INFOnline API abruft, in Airtable speichert und über verschiedene Kanäle (MS Teams, Streamlit Dashboard) bereitstellt.
 
 ---
 
 ## 🏗️ Systemarchitektur
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            ÖWA REPORTER SYSTEM                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         ÖWA REPORTER SYSTEM                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-                              ┌──────────────────┐
-                              │    INFOnline     │
-                              │    ÖWA API       │
-                              └────────┬─────────┘
-                                       │
-                                       ▼ API Call (PI, Visits)
-                                       
-┌──────────────────┐  Trigger   ┌──────────────────┐
-│     Airtable     │◄───────────│     GitLab       │
-│    Automations   │───────────►│     CI/CD        │
-└────────┬─────────┘            └────────┬─────────┘
-         │                               │
-         ▼                               ▼
-┌──────────────────┐            ┌──────────────────┐
-│     Airtable     │            │      GitHub      │
-│   Measurements   │            │   Repository     │
-└────────┬─────────┘            └────────┬─────────┘
-         │                               │
-         │ Lesen                         ▼ Deploy
-         │                      ┌──────────────────┐
-         └─────────────────────►│    Streamlit     │
-                                │      Cloud       │
-                                └────────┬─────────┘
-                                         │
-                                         ▼
-                                ┌──────────────────┐
-                                │     Benutzer     │
-                                └──────────────────┘
-
-Benachrichtigungen:  GitLab CI ───► MS Teams
-KI-Analyse:          GitLab CI ───► OpenAI GPT
-Bilder:              GitLab CI ───► Imgur ───► MS Teams
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  INFOnline   │────▶│   GitLab     │────▶│   Airtable   │────▶│  Streamlit   │
+│     API      │     │    CI/CD     │     │   Database   │     │    Cloud     │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+                            │                    │
+                            │                    │
+                            ▼                    ▼
+                     ┌──────────────┐     ┌──────────────┐
+                     │   OpenAI     │     │   MS Teams   │
+                     │   GPT API    │     │   Webhook    │
+                     └──────────────┘     └──────────────┘
 ```
 
-### Komponenten
+### Komponenten:
 
-| Komponente | Funktion | URL/ID |
-|------------|----------|--------|
-| **INFOnline API** | ÖWA Datenquelle | `reportingapi.infonline.de` |
-| **Airtable** | Datenbank & Trigger | Base ID: `appTIeod85xnBy7Vn` |
-| **GitLab** | CI/CD | `gitlab.com/Florian1143/oewa-reporter` |
-| **GitHub** | Streamlit Source | `github.com/Florian134/oewa-reporter` |
-| **Streamlit Cloud** | Dashboard | `oewa-reporter-xxx.streamlit.app` |
-| **MS Teams** | Notifications | Webhook URL |
-| **OpenAI** | KI-Analyse | Model: `gpt-4o-mini` |
+| Komponente | Funktion |
+|------------|----------|
+| **INFOnline API** | Datenquelle für Page Impressions & Visits |
+| **GitLab CI/CD** | Pipeline-Ausführung (Daily Ingest, Weekly Report, Alerts) |
+| **GitHub** | Source-Repository für Streamlit Cloud |
+| **Airtable** | Primäre Datenspeicherung + Automations für Pipeline-Trigger |
+| **Streamlit Cloud** | Interaktives Web-Dashboard |
+| **OpenAI GPT** | KI-gestützte Alert-Analyse und Report-Summaries |
+| **MS Teams** | Benachrichtigungskanal |
 
 ---
 
-## 🔄 Datenflüsse
+## 📊 Implementierte Features (Session 04.12.2025)
 
-### Flow 1: Daily Ingestion (Täglich 23:59)
-```
-Airtable Automation → GitLab (main) → INFOnline API → Airtable DB → MS Teams
+### 1. OpenAI API Key Validierung ✅
+- Neuer API Key erfolgreich getestet
+- GPT-4o-mini Integration funktioniert
+
+### 2. Streamlit KPI-Berechnung Bug Fix ✅
+**Problem:** Absurde prozentuale Steigerungen (z.B. +3179.9%)
+
+**Ursache:** 
+- Vergleichszeitraum wurde nicht korrekt berechnet
+- Metrik-Filter fehlte bei `df_prev`
+- Unterschiedliche Zeitraumlängen wurden verglichen
+
+**Lösung:**
+```python
+# Vorher: Inkonsistente Zeiträume
+df_prev = df[(df["datum"] >= prev_start) & ...]
+
+# Nachher: Gleiche Länge + alle Filter
+selected_days = (end_date - start_date).days + 1
+prev_end = start_date - timedelta(days=1)
+prev_start = prev_end - timedelta(days=selected_days - 1)
+
+df_prev = df[
+    (df["datum"].dt.date >= prev_start) & 
+    (df["datum"].dt.date <= prev_end) &
+    (df["brand"].isin(selected_brands)) &
+    (df["metrik"].isin(selected_metrics))  # Bug Fix!
+]
 ```
 
-### Flow 2: Weekly Report (Montag 20:00)
-```
-Airtable Automation → GitLab (weekly-trigger) → Airtable (Daten)
-                                              → OpenAI (Analyse)
-                                              → Plotly/Kaleido (Diagramme)
-                                              → Imgur (Upload)
-                                              → MS Teams (Report)
-```
+### 3. Google Analytics-Style Vergleichszeitraum ✅
+**Drei Modi implementiert:**
+- **Vorperiode (automatisch):** Gleich langer Zeitraum direkt davor
+- **Benutzerdefiniert:** Nur Startdatum wählen, Enddatum automatisch
+- **Kein Vergleich:** Deaktiviert
 
-### Flow 3: Streamlit Dashboard (On-Demand)
-```
-GitLab → GitHub (push) → Streamlit Cloud (deploy) ← Airtable (Daten) → Benutzer
-```
+### 4. Wochentags-Analyse nach Property ✅
+**Ersetzt:** Irreführende "Tägliche Trend"-Analyse (nur 1 Messung/Tag um 23:59)
+
+**Neu:** Gruppierte Balkendiagramme zeigen:
+- Ø Page Impressions pro Wochentag (VOL vs Vienna)
+- Ø Visits pro Wochentag (VOL vs Vienna)
+- Erkenntnisse: Bester/Schwächster Tag pro Brand
+
+### 5. Zeitreihen-Analyse nach Property ✅
+**Vorher:** VOL + Vienna zusammenaddiert
+
+**Nachher:** Separate Linien für jede Property
+- VOL: 🔵 Blau
+- Vienna: 🟣 Lila
+- Mit 7-Tage-Durchschnitt pro Brand
+
+### 6. Vergleichszeitraum in ALLEN Diagrammen ✅
+**Implementiert für:**
+- Verteilung nach Brand (gruppierte Balken: Aktuell vs. Vergleich)
+- Wochentags-Analyse (4 Balken: VOL/Vienna × Aktuell/Vergleich)
+- Zeitreihen-Analyse (gestrichelte Linien für Vergleichszeitraum)
+
+**Farbschema:**
+| Property | Aktuell | Vergleich |
+|----------|---------|-----------|
+| VOL | `#3B82F6` (kräftig blau) | `#93C5FD` (hellblau, gestrichelt) |
+| Vienna | `#8B5CF6` (kräftig lila) | `#C4B5FD` (helllila, gestrichelt) |
+
+### 7. Weekly Report mit Diagrammen ✅
+**Neue Features:**
+- Wochentags-Analyse Charts (PNG)
+- 7-Tage-Trend Charts (PNG)
+- Imgur Upload für öffentliche URLs
+- Integration in MS Teams MessageCards
+
+### 8. Airtable-Trigger für Weekly Report ✅
+**Problem:** GitLab Trigger Tokens können keine Pipeline-Variablen setzen
+
+**Lösung:**
+- Dedizierter `weekly-trigger` Branch erstellt
+- `.gitlab-ci.yml` angepasst: `weekly_report` Job triggert bei Push auf diesen Branch
+- Airtable Automation Script aktualisiert
+
+### 9. Datenbereinigung ✅
+**Durchgeführt:**
+- Alle Duplikate aus Airtable entfernt
+- 90-Tage Backfill durchgeführt
+- Duplicate-Check in `daily_ingest.py` implementiert
 
 ---
 
-## 📝 Code-Änderungen
+## 📁 Geänderte Dateien
 
-### Geänderte Dateien
+### Haupt-Anwendung
+| Datei | Änderungen |
+|-------|------------|
+| `streamlit_app.py` | KPI-Fix, Vergleichszeitraum, Wochentags-Analyse, Zeitreihen nach Property |
+| `ci_scripts/weekly_report.py` | Chart-Generation, Imgur Upload, Teams Integration |
+| `ci_scripts/daily_ingest.py` | Duplicate-Check vor Insert |
+| `.gitlab-ci.yml` | Kaleido-Dependency, weekly-trigger Branch Support |
+| `requirements.txt` | `kaleido==0.2.1` hinzugefügt |
 
-| Datei | Änderung |
+### Hilfsskripte (neu erstellt)
+| Datei | Funktion |
 |-------|----------|
-| `streamlit_app.py` | Vergleichszeitraum-Logik, Wochentags-Analyse, Session State |
-| `ci_scripts/weekly_report.py` | Diagramme, Imgur-Upload, GPT-Prompt, Debug-Output |
-| `ci_scripts/daily_ingest.py` | Duplikat-Prüfung (`check_existing_records`) |
-| `.gitlab-ci.yml` | `weekly-trigger` Branch Rule, Kaleido 0.2.1 |
-| `requirements.txt` | `kaleido==0.2.1` |
-
-### Neue Dateien
-
-| Datei | Zweck |
-|-------|-------|
+| `debug_airtable.py` | Lokale Datenanalyse für Debugging |
 | `cleanup_duplicates.py` | Entfernt Duplikate aus Airtable |
-| `debug_airtable.py` | Lokale Datenanalyse |
-| `generate_architecture_diagram.py` | Erstellt Architektur-Diagramm als PNG |
+| `generate_architecture_diagram.py` | Erstellt Architektur-Diagramme als PNG |
 
 ---
 
-## ⚙️ Konfiguration
+## 🐛 Gelöste Probleme
 
-### GitLab CI/CD Variables
+### 1. Streamlit Deployment Issue
+**Problem:** Code-Änderungen wurden nicht deployed
 
-| Variable | Beschreibung |
-|----------|--------------|
-| `AIRTABLE_API_KEY` | Personal Access Token für Airtable |
-| `AIRTABLE_BASE_ID` | `appTIeod85xnBy7Vn` |
-| `INFONLINE_API_KEY` | Bearer Token für ÖWA API |
-| `TEAMS_WEBHOOK_URL` | MS Teams Incoming Webhook |
-| `OPENAI_API_KEY` | OpenAI API Key |
+**Ursache:** Streamlit Cloud's aggressives Caching
 
-### Airtable Automations
+**Lösung:** Force-Redeploy via "Manage app" → Reboot
 
-| Automation | Trigger | Branch | Aktion |
-|------------|---------|--------|--------|
-| Daily ÖWA Ingestion | Täglich 23:59 | `main` | `daily_ingest` Job |
-| Weekly ÖWA Report | Montag 20:00 | `weekly-trigger` | `weekly_report` Job |
+### 2. Kaleido ChromeNotFoundError
+**Problem:** `ChromeNotFoundError` in GitLab CI
 
-### Airtable Automation Script (Weekly)
+**Ursache:** Kaleido v1+ benötigt separate Chrome-Installation
+
+**Lösung:** Pinning auf `kaleido==0.2.1` (inkludiert Chromium)
+
+### 3. GitLab Pipeline Permissions
+**Problem:** "Insufficient permissions to set pipeline variables"
+
+**Ursache:** Trigger Tokens können keine Variablen setzen
+
+**Lösung:** Dedizierter `weekly-trigger` Branch mit angepassten CI-Rules
+
+### 4. Airtable Duplikate
+**Problem:** Inflated Weekly Report Numbers
+
+**Ursache:** Mehrfach-Einträge durch fehlerhafte Backfills
+
+**Lösung:** 
+- Cleanup-Script ausgeführt
+- Duplicate-Check in `daily_ingest.py` implementiert
+- `Unique Key` Feld zur Deduplizierung
+
+---
+
+## 🔧 Airtable Automation Script (aktuell)
+
 ```javascript
+// ÖWA Reporter - Weekly Report Trigger
 const GITLAB_PROJECT_ID = "76833234";
-const GITLAB_TRIGGER_TOKEN = "glptt-xxxxx";
-const GITLAB_REF = "weekly-trigger";  // WICHTIG!
+const GITLAB_TRIGGER_TOKEN = "glptt-5tJWnqVhM7Qb5o3xTPT9";
+const GITLAB_REF = "weekly-trigger";  // Dedizierter Branch
 
 let response = await fetch(
-    `https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/trigger/pipeline`,
-    {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `token=${GITLAB_TRIGGER_TOKEN}&ref=${GITLAB_REF}`
-    }
+  `https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/trigger/pipeline`,
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `token=${GITLAB_TRIGGER_TOKEN}&ref=${GITLAB_REF}`
+  }
 );
+
+let result = await response.json();
+if (response.ok) {
+  console.log("✅ Weekly Report Pipeline getriggert!");
+  console.log("Pipeline ID: " + result.id);
+} else {
+  console.error("❌ Fehler:", JSON.stringify(result));
+  throw new Error("Pipeline trigger failed");
+}
 ```
 
 ---
 
-## 📊 Aktuelle Datenlage
+## 📈 Datenübersicht (Stand 04.12.2025)
 
-### Nach Backfill (04.12.2025)
+### Airtable Measurements
+- **Zeitraum:** 05.09.2025 - 03.12.2025 (90 Tage)
+- **Datensätze:** 360 (4 Metriken × 90 Tage)
+- **Properties:** VOL.AT Web, VIENNA.AT Web
+- **Metriken:** Page Impressions, Visits
 
-| Metrik | Wert |
-|--------|------|
-| **Zeitraum** | 05.09.2025 - 03.12.2025 |
-| **Tage** | 90 |
-| **Records** | 360 |
-| **Duplikate** | 0 ✅ |
+### Aktuelle Woche (27.11. - 03.12.2025)
+| Metrik | VOL.AT | VIENNA.AT |
+|--------|--------|-----------|
+| Page Impressions | 5,301,693 | 601,415 |
+| Visits | 1,728,337 | 323,671 |
 
-### Erwartete Weekly Report Werte (KW 49)
+### Vorwoche (20.11. - 26.11.2025)
+| Metrik | VOL.AT | VIENNA.AT |
+|--------|--------|-----------|
+| Page Impressions | 5,663,630 | 564,435 |
+| Visits | 1,863,528 | 296,857 |
 
-| Metrik | Veränderung vs. Vorwoche |
-|--------|-------------------------|
-| VOL PI | **-6.4%** |
-| VOL Visits | **-7.3%** |
-| Vienna PI | **+6.6%** |
-| Vienna Vis | **+9.0%** |
-
-### Datenstruktur (Unique Key)
-```
-{Datum}_{Brand}_{Plattform}_{Metrik}
-Beispiel: 2025-12-03_VOL_Web_Page Impressions
-```
-
----
-
-## 📋 Offene Punkte & Empfehlungen
-
-### ✅ Erledigt
-- [x] OpenAI API Key validiert
-- [x] Streamlit Prozentwerte korrigiert
-- [x] Weekly Report Diagramme implementiert
-- [x] Duplikat-Problem behoben
-- [x] 90-Tage Backfill durchgeführt
-- [x] Architektur-Dokumentation erstellt
-
-### 🔄 Nächste Schritte
-- [ ] Weekly Report mit korrekten Zahlen testen (Airtable → Testen)
-- [ ] Alert Check Branch erstellen (analog zu `weekly-trigger`)
-- [ ] Monitoring für Duplikate einrichten
-
-### 💡 Empfehlungen
-1. **Regelmäßige Datenprüfung:** Monatlich `debug_airtable.py` ausführen
-2. **Backup:** Airtable-Daten regelmäßig exportieren
-3. **Alerting:** Bei >10% Abweichung automatisch benachrichtigen
+### Veränderungen
+| Metrik | VOL.AT | VIENNA.AT |
+|--------|--------|-----------|
+| Page Impressions | -6.4% | +6.6% |
+| Visits | -7.3% | +9.0% |
 
 ---
 
-## 🔗 Wichtige Links
+## 🌐 URLs & Zugänge
 
-| Ressource | URL |
-|-----------|-----|
-| GitLab Repository | https://gitlab.com/Florian1143/oewa-reporter |
-| GitLab Pipelines | https://gitlab.com/Florian1143/oewa-reporter/-/pipelines |
-| GitHub Repository | https://github.com/Florian134/oewa-reporter |
+| Service | URL |
+|---------|-----|
 | Streamlit Dashboard | https://oewa-reporter-ucgucmpvryylvvkhefxyeq.streamlit.app |
-| Airtable Base | https://airtable.com/appTIeod85xnBy7Vn |
-| Airtable Tokens | https://airtable.com/create/tokens |
+| GitLab Repository | https://gitlab.com/Florian1143/oewa-reporter |
+| GitHub Mirror | https://github.com/Florian134/oewa-reporter |
+| Airtable Base | RM-ÖWA-Reporter-Table |
 
 ---
 
-## 📞 Kontakt & Support
+## ✅ Session-Zusammenfassung
 
-Bei Fragen oder Problemen:
-1. GitLab Issues erstellen
-2. Pipeline Logs prüfen
-3. `debug_airtable.py` für lokale Analyse nutzen
+### Erledigte Aufgaben:
+1. ✅ OpenAI API Key validiert und getestet
+2. ✅ Streamlit KPI-Berechnung korrigiert
+3. ✅ Vergleichszeitraum-Auswahl (Google Analytics-Style) implementiert
+4. ✅ Wochentags-Analyse nach Property hinzugefügt
+5. ✅ Zeitreihen-Analyse nach Property (VOL vs Vienna getrennt)
+6. ✅ Vergleichszeitraum in allen Diagrammen visualisiert
+7. ✅ Weekly Report mit Charts und Imgur-Upload
+8. ✅ Airtable-Trigger für Weekly Report konfiguriert
+9. ✅ Datenbereinigung (Duplikate entfernt, 90-Tage Backfill)
+10. ✅ Vereinfachte Vergleichszeitraum-Auswahl (nur Startdatum)
+
+### Offene Punkte:
+- Keine - alle Anforderungen erfüllt
 
 ---
 
-*Dokumentation erstellt am 04.12.2025*
+## 📝 Nächste empfohlene Schritte
 
+1. **Monitoring:** Weekly Reports auf Korrektheit prüfen
+2. **Alerting:** Alert-Schwellwerte nach Bedarf anpassen
+3. **Erweiterung:** Weitere Properties hinzufügen (falls gewünscht)
+4. **Dokumentation:** PROJEKT_DOKUMENTATION.md aktualisieren
+
+---
+
+*Generiert am 04.12.2025 • ÖWA Reporter v2.0*
