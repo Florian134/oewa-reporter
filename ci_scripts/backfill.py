@@ -23,7 +23,7 @@ from time import sleep
 # =============================================================================
 INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTleod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 
 # Sites Konfiguration
 SITES = [

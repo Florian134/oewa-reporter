@@ -40,9 +40,12 @@ def check_password():
             st.session_state["password_correct"] = False
 
     # Prüfen ob Passwort in Secrets konfiguriert ist
+    # SECURITY: Fail-Closed - Blockiere Zugriff wenn kein Passwort konfiguriert
     if not st.secrets.get("app_password"):
-        st.warning("⚠️ Kein Passwort konfiguriert. Bitte 'app_password' in Streamlit Secrets setzen.")
-        return True  # Ohne Passwort-Config durchlassen (für Entwicklung)
+        st.error("❌ SICHERHEITSFEHLER: Kein Passwort konfiguriert!")
+        st.error("Bitte 'app_password' in Streamlit Cloud → Settings → Secrets setzen.")
+        st.stop()
+        return False  # Blockieren statt durchlassen
     
     if "password_correct" not in st.session_state:
         # Erster Aufruf - Passwort-Eingabe anzeigen

@@ -34,7 +34,7 @@ except ImportError:
 # KONFIGURATION
 # =============================================================================
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTleod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -181,9 +181,12 @@ def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
     if not image_bytes:
         return None
     
-    # Imgur anonymer Upload (Client-ID für anonyme Uploads)
-    # Das ist ein öffentlicher Client-ID für anonyme Uploads
-    IMGUR_CLIENT_ID = "546c25a59c58ad7"  # Öffentlicher anonymer Client
+    # Imgur Client-ID aus Environment Variable (Security Best Practice)
+    IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID", "")
+    
+    if not IMGUR_CLIENT_ID:
+        print("⚠️ IMGUR_CLIENT_ID nicht konfiguriert - Chart-Upload übersprungen")
+        return None
     
     try:
         headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
