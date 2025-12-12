@@ -48,6 +48,8 @@ daily_ingest:
       when: never
     - if: $CI_COMMIT_REF_NAME == "weekly-trigger"
       when: never
+    - if: $CI_COMMIT_REF_NAME == "monthly-trigger"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -89,7 +91,7 @@ weekly_report:
 
 # =============================================================================
 # MONTHLY REPORT v1.0 - Monatsbericht mit MoM-Vergleich
-# Triggern mit: JOB_TYPE=monthly
+# Triggern mit: JOB_TYPE=monthly ODER Branch "monthly-trigger"
 # Automatisch: Am 1. jeden Monats via Airtable Automation
 # Optional: REPORT_MONTH=2025-11 für spezifischen Monat
 # =============================================================================
@@ -111,6 +113,7 @@ monthly_report:
     - echo "✅ Monthly Report completed!"
   rules:
     - if: $JOB_TYPE == "monthly"
+    - if: $CI_COMMIT_REF_NAME == "monthly-trigger" && $CI_PIPELINE_SOURCE == "trigger"
 
 # =============================================================================
 # ALERT CHECK - Manueller Alert-Check (Alerting ist jetzt in daily_ingest integriert)
