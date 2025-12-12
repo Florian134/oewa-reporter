@@ -50,26 +50,35 @@ daily_ingest:
       when: never
     - if: $CI_COMMIT_REF_NAME == "monthly-trigger"
       when: never
+    - if: $CI_COMMIT_REF_NAME == "backfill-90days"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
 
 # =============================================================================
 # BACKFILL v2.0 - Historische Daten laden (Web + App)
-# Triggern mit: JOB_TYPE=backfill BACKFILL_DAYS=30
+# Triggern mit: JOB_TYPE=backfill ODER Branch "backfill-90days"
 # =============================================================================
 backfill:
   stage: run
   image: python:3.11-slim
   script:
     - echo "🔄 ÖWA Reporter - Backfill v2.0"
-    - echo "   Lade letzte ${BACKFILL_DAYS:-30} Tage"
     - pip install --upgrade pip
     - pip install requests python-dotenv
-    - python ci_scripts/backfill.py --days ${BACKFILL_DAYS:-30}
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "backfill-90days" ]; then
+        echo "   Lade letzte 90 Tage (Branch-Trigger)"
+        python ci_scripts/backfill.py --days 90
+      else
+        echo "   Lade letzte ${BACKFILL_DAYS:-30} Tage"
+        python ci_scripts/backfill.py --days ${BACKFILL_DAYS:-30}
+      fi
     - echo "✅ Backfill completed!"
   rules:
     - if: $JOB_TYPE == "backfill"
+    - if: $CI_COMMIT_REF_NAME == "backfill-90days" && $CI_PIPELINE_SOURCE == "trigger"
 
 # =============================================================================
 # WEEKLY REPORT v2.0 - Wöchentlicher Bericht mit großen Diagrammen
