@@ -1,6 +1,14 @@
-# ÖWA Reporter - GitLab CI/CD Pipeline
-# =====================================
+# ÖWA Reporter - GitLab CI/CD Pipeline v2.0
+# ==========================================
 # Triggered by Airtable Automations or GitLab Schedules
+#
+# Jobs:
+# - daily_ingest: Täglicher Daten-Import + Wochentags-Alerting
+# - backfill: Historische Daten nachladen
+# - weekly_report: Wöchentlicher Bericht (jeden Montag)
+# - monthly_report: Monatsbericht (am 1. jeden Monats)
+# - alert_check: Manueller Alert-Check
+# - test_notifications: Test aller Benachrichtigungen
 
 stages:
   - run
@@ -14,13 +22,15 @@ cache:
     - .cache/pip/
 
 # =============================================================================
-# DAILY INGESTION - Standard Job (wird bei jedem Trigger ausgeführt)
+# DAILY INGESTION v2.0 - Web + App, alle Metriken, integriertes Alerting
+# Wird bei jedem Standard-Trigger ausgeführt (außer bei spezifischen Job-Types)
 # =============================================================================
 daily_ingest:
   stage: run
   image: python:3.11-slim
   script:
-    - echo "🚀 ÖWA Reporter - Daily Ingestion"
+    - echo "🚀 ÖWA Reporter - Daily Ingestion v2.0"
+    - echo "   Web + App | PI + Visits + UC + HP-PI"
     - pip install --upgrade pip
     - pip install requests python-dotenv openai
     - python ci_scripts/daily_ingest.py
@@ -30,6 +40,12 @@ daily_ingest:
       when: never
     - if: $JOB_TYPE == "weekly"
       when: never
+    - if: $JOB_TYPE == "monthly"
+      when: never
+    - if: $JOB_TYPE == "alert_check"
+      when: never
+    - if: $JOB_TYPE == "test_notifications"
+      when: never
     - if: $CI_COMMIT_REF_NAME == "weekly-trigger"
       when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
@@ -37,13 +53,15 @@ daily_ingest:
     - if: $CI_PIPELINE_SOURCE == "web"
 
 # =============================================================================
-# BACKFILL - Historische Daten laden (manuell triggern mit JOB_TYPE=backfill)
+# BACKFILL v2.0 - Historische Daten laden (Web + App)
+# Triggern mit: JOB_TYPE=backfill BACKFILL_DAYS=30
 # =============================================================================
 backfill:
   stage: run
   image: python:3.11-slim
   script:
-    - echo "🔄 ÖWA Reporter - Backfill"
+    - echo "🔄 ÖWA Reporter - Backfill v2.0"
+    - echo "   Lade letzte ${BACKFILL_DAYS:-30} Tage"
     - pip install --upgrade pip
     - pip install requests python-dotenv
     - python ci_scripts/backfill.py --days ${BACKFILL_DAYS:-30}
@@ -52,16 +70,16 @@ backfill:
     - if: $JOB_TYPE == "backfill"
 
 # =============================================================================
-# WEEKLY REPORT - Wöchentlicher Bericht mit Diagrammen
-# Triggern mit: JOB_TYPE=weekly ODER Branch "weekly-trigger"
+# WEEKLY REPORT v2.0 - Wöchentlicher Bericht mit großen Diagrammen
+# Triggern mit: JOB_TYPE=weekly
+# Automatisch: Jeden Montag via Airtable Automation
 # =============================================================================
 weekly_report:
   stage: run
   image: python:3.11-slim
   script:
-    - echo "📊 ÖWA Reporter - Weekly Report"
+    - echo "📊 ÖWA Reporter - Weekly Report v2.0"
     - pip install --upgrade pip
-    # Für Diagramme: plotly, kaleido (0.2.1 hat eigenes Chromium), pandas
     - pip install requests python-dotenv openai plotly "kaleido==0.2.1" pandas
     - python ci_scripts/weekly_report.py
     - echo "✅ Weekly Report completed!"
@@ -70,8 +88,34 @@ weekly_report:
     - if: $CI_COMMIT_REF_NAME == "weekly-trigger" && $CI_PIPELINE_SOURCE == "trigger"
 
 # =============================================================================
-# ALERT CHECK - Tägliche Schwellenwert-Prüfung mit GPT-Analyse
-# Triggern mit JOB_TYPE=alert_check
+# MONTHLY REPORT v1.0 - Monatsbericht mit MoM-Vergleich
+# Triggern mit: JOB_TYPE=monthly
+# Automatisch: Am 1. jeden Monats via Airtable Automation
+# Optional: REPORT_MONTH=2025-11 für spezifischen Monat
+# =============================================================================
+monthly_report:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "📊 ÖWA Reporter - Monthly Report v1.0"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv openai plotly "kaleido==0.2.1" pandas
+    - |
+      if [ -n "$REPORT_MONTH" ]; then
+        echo "   Bericht für: $REPORT_MONTH"
+        python ci_scripts/monthly_report.py --month $REPORT_MONTH
+      else
+        echo "   Bericht für Vormonat"
+        python ci_scripts/monthly_report.py
+      fi
+    - echo "✅ Monthly Report completed!"
+  rules:
+    - if: $JOB_TYPE == "monthly"
+
+# =============================================================================
+# ALERT CHECK - Manueller Alert-Check (Alerting ist jetzt in daily_ingest integriert)
+# Triggern mit: JOB_TYPE=alert_check
+# Optional: CHECK_DATE=2025-12-01 für spezifisches Datum
 # =============================================================================
 alert_check:
   stage: run
@@ -80,14 +124,19 @@ alert_check:
     - echo "🚨 ÖWA Reporter - Alert Check"
     - pip install --upgrade pip
     - pip install requests python-dotenv openai
-    - python ci_scripts/alert_check.py
+    - |
+      if [ -n "$CHECK_DATE" ]; then
+        python ci_scripts/alert_check.py --date $CHECK_DATE
+      else
+        python ci_scripts/alert_check.py
+      fi
     - echo "✅ Alert Check completed!"
   rules:
     - if: $JOB_TYPE == "alert_check"
 
 # =============================================================================
 # NOTIFICATION TEST - Testet alle Teams + GPT Funktionen
-# Triggern mit JOB_TYPE=test_notifications
+# Triggern mit: JOB_TYPE=test_notifications
 # =============================================================================
 test_notifications:
   stage: run

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Weekly Report Script
-====================
+Weekly Report Script v2.0
+==========================
 Erstellt einen wöchentlichen Bericht mit:
-- Zusammenfassung der Wochendaten
-- Anomalie-Erkennung (Z-Score)
-- GPT-generierte Analyse
-- Teams-Benachrichtigung mit Diagrammen (PNG)
+- Zusammenfassung aller KPIs (PI, Visits, UC, HP-PI)
+- Web + App Properties
+- WoW-Vergleich (Week-over-Week)
+- GPT-generierte Executive Summary
+- Teams-Benachrichtigung mit großen Diagrammen (1600x800 PNG)
 
 Nutzung:
     python ci_scripts/weekly_report.py
@@ -25,6 +26,7 @@ from typing import List, Dict, Optional, Tuple
 try:
     import plotly.express as px
     import plotly.graph_objects as go
+    import pandas as pd
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
@@ -37,107 +39,111 @@ AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID", "")
 
-# Anomalie-Schwellenwerte
-WARNING_ZSCORE = 2.0
-CRITICAL_ZSCORE = 2.5
-WARNING_PCT = 0.15  # 15%
-CRITICAL_PCT = 0.20  # 20%
+# Chart-Größe (ERHÖHT für bessere Lesbarkeit in Teams)
+CHART_WIDTH = 1600
+CHART_HEIGHT = 800
+CHART_SCALE = 2  # Retina-Qualität
 
-# Brand-Farben (wie in Streamlit)
-BRAND_COLORS = {"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
+# Farben
+BRAND_COLORS = {
+    "VOL Web": "#3B82F6",      # Blau
+    "VOL App": "#60A5FA",      # Hellblau
+    "Vienna Web": "#8B5CF6",   # Lila
+    "Vienna App": "#A78BFA"    # Helllila
+}
+
+# Metriken-Konfiguration
+METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
+
 
 # =============================================================================
-# DIAGRAMM-FUNKTIONEN
+# DIAGRAMM-FUNKTIONEN (Größere PNGs)
 # =============================================================================
 
-def create_weekday_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
+def create_kpi_comparison_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
     """
-    Erstellt ein Wochentags-Balkendiagramm als PNG.
-    
-    Args:
-        data: Dict mit Wochentags-Daten pro Brand
-        metric: "Page Impressions" oder "Visits"
-    
-    Returns:
-        PNG als bytes oder None wenn Plotly nicht verfügbar
+    Erstellt ein KPI-Vergleichs-Balkendiagramm (Aktuell vs. Vorwoche) als großes PNG.
     """
     if not PLOTLY_AVAILABLE:
         return None
     
-    weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-    
-    # Daten für das Chart vorbereiten
     chart_data = []
+    
     for brand in ["VOL", "Vienna"]:
-        if brand in data and metric in data[brand]:
-            weekday_values = data[brand][metric].get("weekday_avg", {})
-            for day_idx, day_name in enumerate(weekday_names):
-                if day_idx in weekday_values:
-                    chart_data.append({
-                        "wochentag": day_name,
-                        "wert": weekday_values[day_idx],
-                        "brand": brand
-                    })
+        for surface in ["Web", "App"]:
+            key = f"{brand}_{surface}"
+            if key in data and metric in data[key]:
+                metric_data = data[key][metric]
+                
+                # Aktuelle Woche
+                chart_data.append({
+                    "property": f"{brand} {surface}",
+                    "wert": metric_data.get("current_sum", 0),
+                    "periode": "Aktuelle Woche"
+                })
+                
+                # Vorwoche
+                chart_data.append({
+                    "property": f"{brand} {surface}",
+                    "wert": metric_data.get("prev_sum", 0),
+                    "periode": "Vorwoche"
+                })
     
     if not chart_data:
         return None
     
-    # Plotly Chart erstellen
-    import pandas as pd
     df = pd.DataFrame(chart_data)
     
     fig = px.bar(
         df,
-        x="wochentag",
+        x="property",
         y="wert",
-        color="brand",
+        color="periode",
         barmode="group",
-        title=f"Ø {metric} pro Wochentag",
-        color_discrete_map=BRAND_COLORS
+        title=f"📊 {metric} - Wochenvergleich",
+        color_discrete_map={
+            "Aktuelle Woche": "#3B82F6",
+            "Vorwoche": "#93C5FD"
+        }
     )
     
     fig.update_layout(
-        yaxis=dict(tickformat=","),
+        yaxis=dict(tickformat=",", title=""),
         xaxis_title="",
-        legend_title="Property",
+        legend_title="",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        width=800,
-        height=400
+        width=CHART_WIDTH,
+        height=CHART_HEIGHT,
+        font=dict(size=14),
+        title_font_size=20
     )
     
-    # Als PNG exportieren
-    img_bytes = fig.to_image(format="png", scale=2)
+    img_bytes = fig.to_image(format="png", scale=CHART_SCALE)
     return img_bytes
 
 
 def create_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
     """
-    Erstellt ein Trend-Liniendiagramm als PNG.
-    
-    Args:
-        data: Dict mit täglichen Werten pro Brand
-        metric: "Page Impressions" oder "Visits"
-    
-    Returns:
-        PNG als bytes oder None wenn Plotly nicht verfügbar
+    Erstellt ein 7-Tage-Trend-Liniendiagramm als großes PNG.
     """
     if not PLOTLY_AVAILABLE:
         return None
     
-    import pandas as pd
-    
-    # Daten für das Chart vorbereiten
     chart_data = []
+    
     for brand in ["VOL", "Vienna"]:
-        if brand in data and metric in data[brand]:
-            daily_values = data[brand][metric].get("daily", {})
-            for datum, wert in daily_values.items():
-                chart_data.append({
-                    "datum": datum,
-                    "wert": wert,
-                    "brand": brand
-                })
+        for surface in ["Web", "App"]:
+            key = f"{brand}_{surface}"
+            if key in data and metric in data[key]:
+                daily = data[key][metric].get("daily", {})
+                for datum, wert in daily.items():
+                    chart_data.append({
+                        "datum": datum,
+                        "wert": wert,
+                        "property": f"{brand} {surface}"
+                    })
     
     if not chart_data:
         return None
@@ -150,42 +156,32 @@ def create_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional
         df,
         x="datum",
         y="wert",
-        color="brand",
-        title=f"{metric} - Tagestrend",
-        color_discrete_map=BRAND_COLORS
+        color="property",
+        title=f"📈 {metric} - 7-Tage-Trend",
+        color_discrete_map=BRAND_COLORS,
+        markers=True
     )
     
     fig.update_layout(
-        yaxis=dict(tickformat=","),
-        xaxis=dict(tickformat="%d.%m."),
-        xaxis_title="Datum",
-        legend_title="Property",
-        width=800,
-        height=400
+        yaxis=dict(tickformat=",", title=""),
+        xaxis=dict(tickformat="%d.%m.", title=""),
+        legend_title="",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        width=CHART_WIDTH,
+        height=CHART_HEIGHT,
+        font=dict(size=14),
+        title_font_size=20
     )
     
-    img_bytes = fig.to_image(format="png", scale=2)
+    img_bytes = fig.to_image(format="png", scale=CHART_SCALE)
     return img_bytes
 
 
 def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
-    """
-    Lädt ein Bild anonym zu Imgur hoch.
-    
-    Args:
-        image_bytes: PNG als bytes
-    
-    Returns:
-        URL des hochgeladenen Bildes oder None bei Fehler
-    """
-    if not image_bytes:
-        return None
-    
-    # Imgur Client-ID aus Environment Variable (Security Best Practice)
-    IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID", "")
-    
-    if not IMGUR_CLIENT_ID:
-        print("⚠️ IMGUR_CLIENT_ID nicht konfiguriert - Chart-Upload übersprungen")
+    """Lädt ein Bild anonym zu Imgur hoch."""
+    if not image_bytes or not IMGUR_CLIENT_ID:
+        if not IMGUR_CLIENT_ID:
+            print("⚠️ IMGUR_CLIENT_ID nicht konfiguriert - Chart-Upload übersprungen")
         return None
     
     try:
@@ -209,6 +205,10 @@ def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
         print(f"⚠️ Imgur Upload Fehler: {e}")
         return None
 
+
+# =============================================================================
+# DATEN-FUNKTIONEN
+# =============================================================================
 
 def get_measurements(days: int = 14) -> List[Dict]:
     """Holt Measurements der letzten X Tage aus Airtable"""
@@ -243,148 +243,145 @@ def get_measurements(days: int = 14) -> List[Dict]:
     return records
 
 
-def calculate_statistics(values: List[float]) -> Dict:
-    """Berechnet Statistiken für eine Werteliste"""
-    if not values or len(values) < 3:
-        return {"valid": False}
+def process_data(records: List[Dict], week_start: date, prev_week_start: date) -> Dict:
+    """
+    Verarbeitet Airtable-Records in strukturierte Daten für den Bericht.
     
-    mean = statistics.mean(values)
-    median = statistics.median(values)
-    stdev = statistics.stdev(values) if len(values) > 1 else 0
+    Returns:
+        Dict mit Struktur: {brand_surface: {metric: {current_sum, prev_sum, daily, wow_change}}}
+    """
+    data = {}
     
-    # MAD (Median Absolute Deviation)
-    mad = statistics.median([abs(x - median) for x in values])
-    mad_scaled = mad * 1.4826  # Skalierungsfaktor für Normalverteilung
+    for record in records:
+        fields = record.get("fields", {})
+        datum_str = fields.get("Datum")
+        brand = fields.get("Brand")
+        surface = fields.get("Plattform", "Web")
+        metric = fields.get("Metrik")
+        wert = fields.get("Wert")
+        
+        if not all([datum_str, brand, metric, wert]):
+            continue
+        
+        try:
+            datum = date.fromisoformat(datum_str)
+        except:
+            continue
+        
+        key = f"{brand}_{surface}"
+        
+        if key not in data:
+            data[key] = {}
+        if metric not in data[key]:
+            data[key][metric] = {
+                "current_sum": 0,
+                "prev_sum": 0,
+                "current_days": 0,
+                "prev_days": 0,
+                "daily": {}
+            }
+        
+        # Aktuelle Woche
+        if datum >= week_start:
+            data[key][metric]["current_sum"] += wert
+            data[key][metric]["current_days"] += 1
+            data[key][metric]["daily"][datum_str] = wert
+        # Vorwoche
+        elif datum >= prev_week_start:
+            data[key][metric]["prev_sum"] += wert
+            data[key][metric]["prev_days"] += 1
     
-    return {
-        "valid": True,
-        "mean": mean,
-        "median": median,
-        "stdev": stdev,
-        "mad": mad,
-        "mad_scaled": mad_scaled,
-        "min": min(values),
-        "max": max(values),
-        "count": len(values)
-    }
+    # WoW-Änderungen berechnen
+    for key in data:
+        for metric in data[key]:
+            m = data[key][metric]
+            if m["prev_sum"] > 0:
+                m["wow_change"] = (m["current_sum"] - m["prev_sum"]) / m["prev_sum"]
+            else:
+                m["wow_change"] = None
+            
+            # Durchschnitte
+            m["current_avg"] = m["current_sum"] / max(1, m["current_days"])
+            m["prev_avg"] = m["prev_sum"] / max(1, m["prev_days"])
+    
+    return data
 
 
-def detect_anomaly(value: float, stats: Dict) -> Dict:
-    """Erkennt Anomalien basierend auf Z-Score und Prozentabweichung"""
-    if not stats.get("valid"):
-        return {"is_anomaly": False, "severity": None}
-    
-    # Z-Score berechnen (robust mit MAD)
-    mad_scaled = stats["mad_scaled"]
-    if mad_scaled < 0.001:
-        mad_scaled = 0.001  # Minimum um Division durch 0 zu vermeiden
-    
-    zscore = (value - stats["median"]) / mad_scaled
-    zscore = max(-10, min(10, zscore))  # Clamp
-    
-    # Prozentabweichung
-    if stats["median"] > 0:
-        pct_delta = (value - stats["median"]) / stats["median"]
-    else:
-        pct_delta = 0
-    
-    # Severity bestimmen
-    severity = None
-    if abs(zscore) >= CRITICAL_ZSCORE and abs(pct_delta) >= CRITICAL_PCT:
-        severity = "critical"
-    elif abs(zscore) >= WARNING_ZSCORE and abs(pct_delta) >= WARNING_PCT:
-        severity = "warning"
-    
-    return {
-        "is_anomaly": severity is not None,
-        "severity": severity,
-        "zscore": round(zscore, 2),
-        "pct_delta": round(pct_delta * 100, 1),
-        "median": stats["median"]
-    }
+# =============================================================================
+# GPT SUMMARY
+# =============================================================================
 
-
-def generate_gpt_summary(data: Dict) -> str:
-    """Generiert eine GPT-Zusammenfassung des Wochenberichts"""
+def generate_gpt_summary(data: Dict, period: str) -> str:
+    """Generiert eine GPT-Zusammenfassung gemäß der neuen Vorlage."""
     if not OPENAI_API_KEY:
         return "GPT-Zusammenfassung nicht verfügbar (API Key fehlt)"
     
-    # Veränderungen formatieren (None → "nicht verfügbar")
-    vol_pi_change = f"{data.get('vol_pi_change')}%" if data.get('vol_pi_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
-    vol_visits_change = f"{data.get('vol_visits_change')}%" if data.get('vol_visits_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
-    vienna_pi_change = f"{data.get('vienna_pi_change')}%" if data.get('vienna_pi_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
-    vienna_visits_change = f"{data.get('vienna_visits_change')}%" if data.get('vienna_visits_change') is not None else "nicht verfügbar (unvollständige Vorwochendaten)"
+    # Daten für den Prompt aufbereiten
+    kpi_text = ""
+    for key in ["VOL_Web", "VOL_App", "Vienna_Web", "Vienna_App"]:
+        if key in data:
+            kpi_text += f"\n**{key.replace('_', ' ')}:**\n"
+            for metric in METRICS:
+                if metric in data[key]:
+                    m = data[key][metric]
+                    wow = f"{m['wow_change']*100:+.1f}%" if m.get('wow_change') is not None else "N/A"
+                    kpi_text += f"  - {metric}: {m['current_sum']:,} (WoW: {wow})\n"
     
-    # Datenqualitätshinweis
-    data_quality = data.get('data_quality_note', '')
-    data_quality_section = f"\nDATENQUALITÄT:\n{data_quality}\n" if data_quality else ""
+    # Beste/Schlechteste Performance identifizieren
+    changes = []
+    for key in data:
+        for metric in data[key]:
+            m = data[key][metric]
+            if m.get("wow_change") is not None:
+                changes.append({
+                    "name": f"{key.replace('_', ' ')} {metric}",
+                    "change": m["wow_change"]
+                })
     
-    # Aktuelles Datum für Kontext (Saisonalität, Feiertage)
-    from datetime import datetime
-    current_month = datetime.now().strftime("%B")
-    current_week = datetime.now().isocalendar()[1]
+    if changes:
+        best = max(changes, key=lambda x: x["change"])
+        worst = min(changes, key=lambda x: x["change"])
+        highlight_text = f"🏆 TOP: {best['name']} ({best['change']*100:+.1f}%)\n📉 LOW: {worst['name']} ({worst['change']*100:+.1f}%)"
+    else:
+        highlight_text = "Keine Vergleichsdaten verfügbar"
     
-    # Beste Performance identifizieren für Highlight
-    changes = {
-        "VOL.AT Page Impressions": data.get('vol_pi_change'),
-        "VOL.AT Visits": data.get('vol_visits_change'),
-        "VIENNA.AT Page Impressions": data.get('vienna_pi_change'),
-        "VIENNA.AT Visits": data.get('vienna_visits_change')
-    }
-    valid_changes = {k: v for k, v in changes.items() if v is not None}
-    best_performer = max(valid_changes.items(), key=lambda x: x[1]) if valid_changes else ("N/A", 0)
-    worst_performer = min(valid_changes.items(), key=lambda x: x[1]) if valid_changes else ("N/A", 0)
-    
-    prompt = f"""Du bist ein erfahrener Web-Analytics-Experte und Kommunikationsprofi für österreichische Medienunternehmen.
-Deine Aufgabe: Erstelle einen EXECUTIVE SUMMARY für die Geschäftsleitung - professionell, aber lebendig und handlungsorientiert.
+    prompt = f"""Du bist ein Senior-Web-Analytics-Experte für österreichische Medienunternehmen.
+Erstelle einen klaren, kompakten EXECUTIVE SUMMARY für das Management von Russmedia.
 
 ═══════════════════════════════════════════════════════════════
-📅 BERICHTSZEITRAUM: {data.get('period', 'N/A')} (KW {current_week})
-📊 Datenbasis: {data.get('current_days', 'N/A')} Tage aktuell, {data.get('prev_days', 'N/A')} Tage Vorwoche
-{data_quality_section}
+📅 BERICHTSZEITRAUM: {period}
 ═══════════════════════════════════════════════════════════════
 
-🔵 VOL.AT (Vorarlberg Online):
-   • Page Impressions: {data.get('vol_pi_week', 0):,} gesamt ({data.get('vol_pi_avg', 0):,.0f}/Tag)
-   • Visits: {data.get('vol_visits_week', 0):,} gesamt ({data.get('vol_visits_avg', 0):,.0f}/Tag)
-   • Veränderung PI: {vol_pi_change} | Visits: {vol_visits_change}
+KPI-DATEN:
+{kpi_text}
 
-🟣 VIENNA.AT (Wien Online):
-   • Page Impressions: {data.get('vienna_pi_week', 0):,} gesamt ({data.get('vienna_pi_avg', 0):,.0f}/Tag)
-   • Visits: {data.get('vienna_visits_week', 0):,} gesamt ({data.get('vienna_visits_avg', 0):,.0f}/Tag)
-   • Veränderung PI: {vienna_pi_change} | Visits: {vienna_visits_change}
-
-🏆 TOP-PERFORMER: {best_performer[0]} mit {best_performer[1]:+.1f}%
-📉 BEOBACHTEN: {worst_performer[0]} mit {worst_performer[1]:+.1f}%
-
-⚠️ ANOMALIEN:
-{data.get('anomalies_text', 'Keine statistischen Anomalien erkannt.')}
+PERFORMANCE-ÜBERSICHT:
+{highlight_text}
 
 ═══════════════════════════════════════════════════════════════
 
-DEINE AUFGABE - Erstelle eine Zusammenfassung mit EXAKT dieser Struktur:
+Erstelle folgende Struktur (EXAKT einhalten):
 
 **📈 HIGHLIGHT DER WOCHE**
-[1 Satz: Was ist die wichtigste positive Nachricht? Beginne mit einer Zahl oder einem starken Statement.]
+[1 Satz – wichtigste Erkenntnis, z.B. stärkste Steigerung oder kritischster Rückgang.]
 
-**🎯 ZUSAMMENFASSUNG**
-[2-3 Sätze: Kernbotschaft der Wochenperformance. Vergleiche beide Properties. Nutze konkrete Zahlen.]
+**📊 WEEK-OVER-WEEK (WoW)**
+[2–3 Sätze – Entwicklung der KPIs (Visits, UC, PI, HP-PI).
+Formuliere aktiv: "Visits steigen um +3,2%". Hebe wesentliche Trends hervor.
+Vergleiche Web vs. App Performance.]
 
-**🔍 KONTEXT & EINORDNUNG**
-[1-2 Sätze: Ordne die Zahlen ein. Berücksichtige: Dezember = Adventzeit, erhöhter Medienkonsum. 
-Wochenenden typischerweise schwächer. Feiertage können Ausreißer verursachen.]
+**🧭 KONTEXT & EINORDNUNG**
+[1–2 Sätze – saisonale Muster (Wochenende, Feiertage, News-Lage),
+Abweichungen aufgrund externer Faktoren. Dezember = Adventzeit.]
 
-**✅ BEWERTUNG**
-[1 Satz: Gesamteinschätzung - ist die Entwicklung positiv/stabil/besorgniserregend?]
+**✅ GESAMTBEWERTUNG**
+[1 Satz – Gesamtentwicklung der Woche (positiv/stabil/leicht rückläufig/kritisch).]
 
-STILRICHTLINIEN:
-- Schreibe wie ein Analyst, der vor dem Vorstand präsentiert
-- Beginne mit dem Wichtigsten (Inverted Pyramid)
-- Nutze aktive Sprache: "VIENNA.AT legte um 28% zu" statt "Es wurde ein Wachstum von 28% verzeichnet"
-- Bei positiven Zahlen: enthusiastisch aber professionell
-- Bei negativen Zahlen: sachlich, lösungsorientiert
-- Keine leeren Floskeln wie "es bleibt abzuwarten"
-- Max. 180 Wörter insgesamt
+STILVORGABEN:
+- Professionell, prägnant, datengetrieben
+- Keine Aufzählung von Rohdaten – nur Erkenntnisse
+- Fokus auf: Was bedeutet das für das Management?
+- Maximal 180 Wörter
 """
 
     try:
@@ -411,62 +408,48 @@ STILRICHTLINIEN:
         return f"GPT-Fehler: {str(e)}"
 
 
-def send_teams_report(title: str, summary: str, data: Dict, anomalies: List[Dict], image_urls: Dict[str, str] = None):
-    """
-    Sendet den Wochenbericht an Teams mit optionalen Diagrammen.
-    
-    Args:
-        title: Titel des Berichts
-        summary: GPT-generierte Zusammenfassung
-        data: Statistik-Daten
-        anomalies: Liste erkannter Anomalien
-        image_urls: Dict mit Bild-URLs (optional)
-    """
+# =============================================================================
+# TEAMS NOTIFICATION
+# =============================================================================
+
+def send_teams_report(title: str, summary: str, data: Dict, period: str, image_urls: Dict[str, str] = None):
+    """Sendet den Wochenbericht an Teams mit Diagrammen."""
     if not TEAMS_WEBHOOK_URL:
         print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
         return
     
-    # Farbe basierend auf Anomalien
-    if any(a["severity"] == "critical" for a in anomalies):
-        color = "DC3545"  # Rot
-    elif any(a["severity"] == "warning" for a in anomalies):
+    # Farbe basierend auf Gesamtperformance
+    total_positive = 0
+    total_negative = 0
+    for key in data:
+        for metric in data[key]:
+            m = data[key][metric]
+            if m.get("wow_change") is not None:
+                if m["wow_change"] > 0:
+                    total_positive += 1
+                else:
+                    total_negative += 1
+    
+    if total_positive > total_negative:
+        color = "28A745"  # Grün
+    elif total_negative > total_positive:
         color = "FFC107"  # Gelb
     else:
-        color = "28A745"  # Grün
+        color = "17A2B8"  # Blau (neutral)
     
-    # Veränderungen formatieren (nur anzeigen wenn valide)
-    def format_change(change_val):
-        if change_val is None:
-            return ""
-        return f" ({change_val:+.1f}%)"
+    # Facts aufbauen
+    facts = [{"name": "📅 Zeitraum", "value": period}]
     
-    # Facts für die Karte - mit Durchschnittswerten
-    facts = [
-        {"name": "📅 Zeitraum", "value": data.get("period", "N/A")},
-        {"name": "📊 VOL.AT PI", "value": f"{data.get('vol_pi_week', 0):,}{format_change(data.get('vol_pi_change'))}"},
-        {"name": "📈 VOL.AT Ø/Tag", "value": f"{data.get('vol_pi_avg', 0):,.0f}"},
-        {"name": "👥 VOL.AT Visits", "value": f"{data.get('vol_visits_week', 0):,}{format_change(data.get('vol_visits_change'))}"},
-        {"name": "📊 VIENNA.AT PI", "value": f"{data.get('vienna_pi_week', 0):,}{format_change(data.get('vienna_pi_change'))}"},
-        {"name": "📈 VIENNA.AT Ø/Tag", "value": f"{data.get('vienna_pi_avg', 0):,.0f}"},
-        {"name": "👥 VIENNA.AT Visits", "value": f"{data.get('vienna_visits_week', 0):,}{format_change(data.get('vienna_visits_change'))}"},
-    ]
+    for key in ["VOL_Web", "VOL_App", "Vienna_Web", "Vienna_App"]:
+        if key in data and "Page Impressions" in data[key]:
+            m = data[key]["Page Impressions"]
+            wow = f" ({m['wow_change']*100:+.1f}%)" if m.get('wow_change') is not None else ""
+            facts.append({
+                "name": f"📊 {key.replace('_', ' ')} PI",
+                "value": f"{m['current_sum']:,}{wow}"
+            })
     
-    # Datenqualitäts-Hinweis wenn nötig
-    data_quality_note = data.get("data_quality_note")
-    
-    # Anomalien-Text - verbesserte Darstellung
-    anomaly_text = ""
-    if anomalies:
-        anomaly_text = "\n\n**⚠️ Tageswert-Anomalien:**\n"
-        for a in anomalies[:5]:  # Max 5 anzeigen
-            icon = "🔴" if a["severity"] == "critical" else "🟡"
-            direction = "über" if a['pct_delta'] > 0 else "unter"
-            anomaly_text += f"- {icon} {a['brand']} {a['metric']}: Letzter Tag {abs(a['pct_delta']):.1f}% {direction} Median\n"
-    
-    # Datenqualitätshinweis formatieren
-    quality_text = f"\n\n**📋 Datenhinweis:** {data_quality_note}" if data_quality_note else ""
-    
-    # Sections aufbauen
+    # Sections
     sections = [
         {
             "activityTitle": title,
@@ -474,28 +457,20 @@ def send_teams_report(title: str, summary: str, data: Dict, anomalies: List[Dict
             "markdown": True
         },
         {
-            "text": f"**🤖 KI-Analyse:**\n\n{summary}{anomaly_text}{quality_text}",
+            "text": f"**🤖 KI-Analyse:**\n\n{summary}",
             "markdown": True
         }
     ]
     
-    # Bilder hinzufügen wenn verfügbar
+    # Bilder hinzufügen (mit Link zum Vergrößern)
     if image_urls:
         for chart_name, url in image_urls.items():
             if url:
                 sections.append({
                     "title": f"📊 {chart_name}",
+                    "text": f"[🔍 Klicken zum Vergrößern]({url})",
                     "images": [{"image": url, "title": chart_name}]
                 })
-    
-    # Dashboard-Link hinzufügen
-    potential_action = {
-        "@type": "OpenUri",
-        "name": "📈 Dashboard öffnen",
-        "targets": [
-            {"os": "default", "uri": "https://oewa-reporter-ucgucmpvryylvvkhefxyeq.streamlit.app"}
-        ]
-    }
     
     card = {
         "@type": "MessageCard",
@@ -503,7 +478,11 @@ def send_teams_report(title: str, summary: str, data: Dict, anomalies: List[Dict
         "summary": title,
         "themeColor": color,
         "sections": sections,
-        "potentialAction": [potential_action]
+        "potentialAction": [{
+            "@type": "OpenUri",
+            "name": "📈 Dashboard öffnen",
+            "targets": [{"os": "default", "uri": "https://oewa-reporter-ucgucmpvryylvvkhefxyeq.streamlit.app"}]
+        }]
     }
     
     try:
@@ -511,22 +490,33 @@ def send_teams_report(title: str, summary: str, data: Dict, anomalies: List[Dict
         if response.status_code == 200:
             print("✅ Teams Bericht gesendet")
         else:
-            print(f"⚠️ Teams Fehler: {response.status_code} - {response.text[:200]}")
+            print(f"⚠️ Teams Fehler: {response.status_code}")
     except Exception as e:
         print(f"⚠️ Teams Fehler: {e}")
 
 
+# =============================================================================
+# MAIN
+# =============================================================================
+
 def run_weekly_report():
     """Hauptfunktion für den Wochenbericht"""
     print("=" * 70)
-    print("📊 ÖWA WEEKLY REPORT")
+    print("📊 ÖWA WEEKLY REPORT v2.0")
+    print("   Web + App | PI + Visits + UC + HP-PI")
     print("=" * 70)
     
     if not AIRTABLE_API_KEY:
         print("❌ AIRTABLE_API_KEY nicht gesetzt!")
         return
     
-    # Daten der letzten 14 Tage holen (für Vergleich)
+    # Zeiträume definieren
+    today = date.today()
+    week_start = today - timedelta(days=7)
+    prev_week_start = today - timedelta(days=14)
+    period = f"{week_start.strftime('%d.%m.')} - {today.strftime('%d.%m.%Y')} (KW {today.isocalendar()[1]})"
+    
+    # Daten laden
     print("\n📥 Lade Daten aus Airtable...")
     records = get_measurements(days=14)
     print(f"   → {len(records)} Datensätze geladen")
@@ -535,241 +525,57 @@ def run_weekly_report():
         print("❌ Keine Daten gefunden!")
         return
     
-    # Daten nach Brand/Metrik gruppieren
-    today = date.today()
-    week_start = today - timedelta(days=7)
-    prev_week_start = today - timedelta(days=14)
+    # Daten verarbeiten
+    print("\n📈 Verarbeite Daten...")
+    data = process_data(records, week_start, prev_week_start)
     
-    # Daten aufbereiten - erweitert für Diagramme
-    current_week = {"VOL": {"Page Impressions": [], "Visits": []}, 
-                    "Vienna": {"Page Impressions": [], "Visits": []}}
-    prev_week = {"VOL": {"Page Impressions": [], "Visits": []}, 
-                 "Vienna": {"Page Impressions": [], "Visits": []}}
-    
-    # Erweiterte Datenstruktur für Diagramme
-    chart_data = {
-        "VOL": {
-            "Page Impressions": {"daily": {}, "weekday_avg": {}},
-            "Visits": {"daily": {}, "weekday_avg": {}}
-        },
-        "Vienna": {
-            "Page Impressions": {"daily": {}, "weekday_avg": {}},
-            "Visits": {"daily": {}, "weekday_avg": {}}
-        }
-    }
-    weekday_counts = {
-        "VOL": {"Page Impressions": {}, "Visits": {}},
-        "Vienna": {"Page Impressions": {}, "Visits": {}}
-    }
-    
-    for record in records:
-        fields = record.get("fields", {})
-        datum_str = fields.get("Datum")
-        if not datum_str:
-            continue
-        
-        try:
-            datum = date.fromisoformat(datum_str)
-        except:
-            continue
-        
-        brand = fields.get("Brand")
-        metric = fields.get("Metrik")
-        wert = fields.get("Wert")
-        
-        if not all([brand, metric, wert]):
-            continue
-        
-        if brand not in current_week or metric not in current_week[brand]:
-            continue
-        
-        # Für Wochen-Vergleich
-        if datum >= week_start:
-            current_week[brand][metric].append(wert)
-            
-            # Für Diagramme: Tägliche Werte speichern
-            chart_data[brand][metric]["daily"][datum_str] = wert
-            
-            # Für Wochentags-Analyse
-            weekday = datum.weekday()
-            if weekday not in weekday_counts[brand][metric]:
-                weekday_counts[brand][metric][weekday] = []
-            weekday_counts[brand][metric][weekday].append(wert)
-            
-        elif datum >= prev_week_start:
-            prev_week[brand][metric].append(wert)
-    
-    # Wochentags-Durchschnitte berechnen
-    for brand in ["VOL", "Vienna"]:
-        for metric in ["Page Impressions", "Visits"]:
-            for weekday, values in weekday_counts[brand][metric].items():
-                if values:
-                    chart_data[brand][metric]["weekday_avg"][weekday] = sum(values) / len(values)
-    
-    # Statistiken berechnen
-    print("\n📈 Berechne Statistiken...")
-    
-    # Anzahl der Tage pro Woche zählen (für Datenqualitätsprüfung)
-    current_days_vol = len(current_week["VOL"]["Page Impressions"])
-    current_days_vienna = len(current_week["Vienna"]["Page Impressions"])
-    prev_days_vol = len(prev_week["VOL"]["Page Impressions"])
-    prev_days_vienna = len(prev_week["Vienna"]["Page Impressions"])
-    
-    # DEBUG: Detaillierte Datenanalyse
-    print(f"\n   🔍 DEBUG - Datenanalyse:")
-    print(f"   Zeitraum aktuell: {week_start} bis {today} ({current_days_vol} Tage VOL, {current_days_vienna} Vienna)")
-    print(f"   Zeitraum Vorwoche: {prev_week_start} bis {week_start - timedelta(days=1)} ({prev_days_vol} Tage VOL, {prev_days_vienna} Vienna)")
-    
-    print(f"\n   VOL Page Impressions:")
-    print(f"   - Aktuelle Woche: {current_week['VOL']['Page Impressions']}")
-    print(f"   - Vorwoche: {prev_week['VOL']['Page Impressions']}")
-    print(f"   - Summe aktuell: {sum(current_week['VOL']['Page Impressions']):,}")
-    print(f"   - Summe Vorwoche: {sum(prev_week['VOL']['Page Impressions']):,}")
-    
-    print(f"\n   VOL Visits:")
-    print(f"   - Aktuelle Woche: {current_week['VOL']['Visits']}")
-    print(f"   - Vorwoche: {prev_week['VOL']['Visits']}")
-    print(f"   - Summe aktuell: {sum(current_week['VOL']['Visits']):,}")
-    print(f"   - Summe Vorwoche: {sum(prev_week['VOL']['Visits']):,}")
-    
-    data = {
-        "period": f"{week_start.strftime('%d.%m.')} - {today.strftime('%d.%m.%Y')}",
-        "vol_pi_week": sum(current_week["VOL"]["Page Impressions"]),
-        "vol_pi_avg": sum(current_week["VOL"]["Page Impressions"]) / max(1, current_days_vol),
-        "vol_visits_week": sum(current_week["VOL"]["Visits"]),
-        "vol_visits_avg": sum(current_week["VOL"]["Visits"]) / max(1, current_days_vol),
-        "vienna_pi_week": sum(current_week["Vienna"]["Page Impressions"]),
-        "vienna_pi_avg": sum(current_week["Vienna"]["Page Impressions"]) / max(1, current_days_vienna),
-        "vienna_visits_week": sum(current_week["Vienna"]["Visits"]),
-        "vienna_visits_avg": sum(current_week["Vienna"]["Visits"]) / max(1, current_days_vienna),
-        # Datenqualität
-        "current_days": current_days_vol,
-        "prev_days": prev_days_vol,
-    }
-    
-    # Veränderungen berechnen - NUR wenn beide Wochen vergleichbare Datenmenge haben
-    prev_vol_pi = sum(prev_week["VOL"]["Page Impressions"])
-    prev_vol_visits = sum(prev_week["VOL"]["Visits"])
-    prev_vienna_pi = sum(prev_week["Vienna"]["Page Impressions"])
-    prev_vienna_visits = sum(prev_week["Vienna"]["Visits"])
-    
-    # Datenqualitätsprüfung: Mindestens 5 Tage in beiden Wochen für validen Vergleich
-    data_quality_ok = prev_days_vol >= 5 and current_days_vol >= 5
-    
-    if data_quality_ok and prev_vol_pi > 0:
-        data["vol_pi_change"] = round((data["vol_pi_week"] - prev_vol_pi) / prev_vol_pi * 100, 1)
-    else:
-        data["vol_pi_change"] = None
-        
-    if data_quality_ok and prev_vol_visits > 0:
-        data["vol_visits_change"] = round((data["vol_visits_week"] - prev_vol_visits) / prev_vol_visits * 100, 1)
-    else:
-        data["vol_visits_change"] = None
-        
-    if data_quality_ok and prev_vienna_pi > 0:
-        data["vienna_pi_change"] = round((data["vienna_pi_week"] - prev_vienna_pi) / prev_vienna_pi * 100, 1)
-    else:
-        data["vienna_pi_change"] = None
-        
-    if data_quality_ok and prev_vienna_visits > 0:
-        data["vienna_visits_change"] = round((data["vienna_visits_week"] - prev_vienna_visits) / prev_vienna_visits * 100, 1)
-    else:
-        data["vienna_visits_change"] = None
-    
-    # Datenqualitäts-Hinweis
-    if not data_quality_ok:
-        data["data_quality_note"] = f"⚠️ Eingeschränkte Vergleichbarkeit: Aktuelle Woche {current_days_vol} Tage, Vorwoche {prev_days_vol} Tage"
-        print(f"   ⚠️ Datenqualität: Aktuelle Woche {current_days_vol} Tage, Vorwoche {prev_days_vol} Tage")
-    else:
-        data["data_quality_note"] = None
-    
-    vol_pi_str = f"{data['vol_pi_change']:+.1f}%" if data['vol_pi_change'] is not None else "N/A (Daten unvollständig)"
-    vol_visits_str = f"{data['vol_visits_change']:+.1f}%" if data['vol_visits_change'] is not None else "N/A (Daten unvollständig)"
-    vienna_pi_str = f"{data['vienna_pi_change']:+.1f}%" if data['vienna_pi_change'] is not None else "N/A (Daten unvollständig)"
-    vienna_visits_str = f"{data['vienna_visits_change']:+.1f}%" if data['vienna_visits_change'] is not None else "N/A (Daten unvollständig)"
-    
-    print(f"   VOL.AT PI: {data['vol_pi_week']:,} ({vol_pi_str})")
-    print(f"   VOL.AT Visits: {data['vol_visits_week']:,} ({vol_visits_str})")
-    print(f"   VIENNA.AT PI: {data['vienna_pi_week']:,} ({vienna_pi_str})")
-    print(f"   VIENNA.AT Visits: {data['vienna_visits_week']:,} ({vienna_visits_str})")
-    
-    # Anomalie-Erkennung (basierend auf Tageswerten)
-    print("\n🔍 Anomalie-Erkennung (letzter Tageswert vs. historischer Median)...")
-    anomalies = []
-    
-    for brand in ["VOL", "Vienna"]:
-        for metric in ["Page Impressions", "Visits"]:
-            all_values = current_week[brand][metric] + prev_week[brand][metric]
-            if len(all_values) >= 5:
-                stats = calculate_statistics(all_values[:-1])  # Alle außer dem letzten
-                if current_week[brand][metric]:
-                    latest = current_week[brand][metric][-1]
-                    anomaly = detect_anomaly(latest, stats)
-                    if anomaly["is_anomaly"]:
-                        anomaly["brand"] = brand
-                        anomaly["metric"] = metric
-                        anomaly["latest_value"] = latest
-                        anomaly["median_value"] = stats["median"]
-                        anomalies.append(anomaly)
-                        print(f"   ⚠️ {brand} {metric}: {anomaly['severity'].upper()}")
-                        print(f"      Letzter Tag: {latest:,.0f} | Median: {stats['median']:,.0f} | Abweichung: {anomaly['pct_delta']:+.1f}%")
-    
-    if not anomalies:
-        print("   ✅ Keine Anomalien erkannt")
-    
-    # Anomalien-Text für GPT - präzisere Beschreibung
-    if anomalies:
-        anomaly_lines = []
-        for a in anomalies:
-            direction = "über" if a['pct_delta'] > 0 else "unter"
-            anomaly_lines.append(
-                f"- {a['brand']} {a['metric']}: Der letzte Tageswert ({a['latest_value']:,.0f}) liegt {abs(a['pct_delta']):.1f}% {direction} dem historischen Median ({a['median_value']:,.0f}). Z-Score: {a['zscore']}"
-            )
-        data["anomalies_text"] = "\n".join(anomaly_lines)
-    else:
-        data["anomalies_text"] = "Keine Anomalien erkannt."
+    # Statistiken ausgeben
+    for key in data:
+        print(f"\n   {key}:")
+        for metric in data[key]:
+            m = data[key][metric]
+            wow = f"{m['wow_change']*100:+.1f}%" if m.get('wow_change') is not None else "N/A"
+            print(f"      {metric}: {m['current_sum']:,} (WoW: {wow})")
     
     # Diagramme erstellen und hochladen
     image_urls = {}
     if PLOTLY_AVAILABLE:
-        print("\n📊 Erstelle Diagramme...")
+        print("\n📊 Erstelle Diagramme (1600x800)...")
         
         try:
-            # Wochentags-Analyse Chart
-            weekday_png = create_weekday_chart(chart_data, "Page Impressions")
-            if weekday_png:
-                print("   → Wochentags-Analyse erstellt")
-                url = upload_to_imgur(weekday_png)
+            # PI Vergleich
+            chart_bytes = create_kpi_comparison_chart(data, "Page Impressions")
+            if chart_bytes:
+                print("   → PI-Vergleich erstellt")
+                url = upload_to_imgur(chart_bytes)
                 if url:
-                    image_urls["Wochentags-Analyse (PI)"] = url
+                    image_urls["Page Impressions Vergleich"] = url
                     print(f"   → Hochgeladen: {url[:50]}...")
             
             # Trend Chart
-            trend_png = create_trend_chart(chart_data, "Page Impressions")
-            if trend_png:
+            trend_bytes = create_trend_chart(data, "Page Impressions")
+            if trend_bytes:
                 print("   → Trend-Diagramm erstellt")
-                url = upload_to_imgur(trend_png)
+                url = upload_to_imgur(trend_bytes)
                 if url:
-                    image_urls["7-Tage-Trend (PI)"] = url
+                    image_urls["7-Tage-Trend"] = url
                     print(f"   → Hochgeladen: {url[:50]}...")
+                    
         except Exception as e:
             print(f"   ⚠️ Diagramm-Erstellung fehlgeschlagen: {e}")
-            print("   → Bericht wird ohne Diagramme gesendet")
-    else:
-        print("\n⚠️ Plotly nicht verfügbar - keine Diagramme erstellt")
     
-    # GPT-Zusammenfassung
+    # GPT Summary
     print("\n🤖 Generiere KI-Zusammenfassung...")
-    summary = generate_gpt_summary(data)
+    summary = generate_gpt_summary(data, period)
     print(f"   → {len(summary)} Zeichen generiert")
     
-    # Teams-Bericht senden
+    # Teams Bericht
     print("\n📤 Sende Teams-Bericht...")
     title = f"📊 ÖWA Wochenbericht - KW {today.isocalendar()[1]}"
-    send_teams_report(title, summary, data, anomalies, image_urls)
+    send_teams_report(title, summary, data, period, image_urls)
     
     print("\n" + "=" * 70)
-    print("✅ WEEKLY REPORT ABGESCHLOSSEN")
+    print("✅ WEEKLY REPORT v2.0 ABGESCHLOSSEN")
     print("=" * 70)
 
 

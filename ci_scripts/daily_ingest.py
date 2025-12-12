@@ -1,41 +1,73 @@
 #!/usr/bin/env python3
 """
-Daily Ingestion Script
-=======================
+Daily Ingestion Script - Erweiterte Version
+=============================================
 Wird von GitLab CI/CD ausgeführt, getriggert durch Airtable Automation.
 
 Funktionen:
-1. INFOnline API abrufen
+1. INFOnline API abrufen (Web + App, alle Metriken)
 2. Daten in Airtable speichern
-3. Anomalien erkennen
-4. Bei Anomalien: Teams Benachrichtigung
+3. Wochentags-Alerting (±10% Schwelle)
+4. Bei Anomalien: Teams Benachrichtigung mit GPT-Analyse
+
+Neue Properties (v2.0):
+- VOL.AT Web + App
+- VIENNA.AT Web + App
+- Homepage PI (nur Web)
+- Unique Clients (alle)
 """
 
 import os
 import json
 import requests
+import statistics
 from datetime import date, datetime, timedelta
+from typing import List, Dict, Optional, Tuple
 
 # =============================================================================
 # KONFIGURATION (aus GitLab CI/CD Variables)
 # =============================================================================
 INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")  # Großes I, nicht kleines l!
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# Alerting-Schwellenwert (±10%)
+ALERT_THRESHOLD_PCT = 0.10
 
 # =============================================================================
-# SITES KONFIGURATION - Korrekte ÖWA Site-IDs
+# SITES KONFIGURATION - Erweitert für Web + App
 # =============================================================================
 SITES = [
+    # === WEB ===
     {"name": "VOL.AT Web", "site_id": "at_w_atvol", "brand": "VOL", "surface": "Web"},
     {"name": "VIENNA.AT Web", "site_id": "at_w_atvienna", "brand": "Vienna", "surface": "Web"},
+    
+    # === APP ===
+    {"name": "VOL.AT App", "site_id": "EA000004_mobile_app", "brand": "VOL", "surface": "App"},
+    {"name": "VIENNA.AT App", "site_id": "EA000003_mobile_app", "brand": "Vienna", "surface": "App"},
 ]
 
-METRICS = ["pageimpressions", "visits"]
+# Homepage Sites (nur Web, Belegungseinheiten)
+HOMEPAGE_SITES = [
+    {"name": "VOL.AT Homepage", "site_id": "BE000072", "brand": "VOL", "surface": "Web"},
+    {"name": "VIENNA.AT Homepage", "site_id": "BE000043", "brand": "Vienna", "surface": "Web"},
+]
+
+# Standard-Metriken für alle Sites
+METRICS = ["pageimpressions", "visits", "uniqueclients"]
 METRICS_MAP = {
     "pageimpressions": "Page Impressions",
-    "visits": "Visits"
+    "visits": "Visits",
+    "uniqueclients": "Unique Clients"
+}
+
+# API-Feldnamen für Wert-Extraktion
+VALUE_FIELDS = {
+    "pageimpressions": "pis",
+    "visits": "visits",
+    "uniqueclients": "unique_clients"
 }
 
 
@@ -56,10 +88,35 @@ def fetch_infonline_data(site_id: str, metric: str, target_date: date) -> dict:
         response = requests.get(url, params=params, headers=headers, timeout=30)
         if response.status_code == 200:
             return {"success": True, "data": response.json()}
+        elif response.status_code == 404:
+            return {"success": False, "error": "Keine Daten verfügbar"}
         else:
             return {"success": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def extract_value(data: dict, metric_key: str) -> Tuple[Optional[int], bool]:
+    """
+    Extrahiert den Wert aus der API-Response.
+    
+    Returns:
+        Tuple[value, preliminary]
+    """
+    if not isinstance(data, dict) or "data" not in data:
+        return None, True
+    
+    api_data = data["data"]
+    value_field = VALUE_FIELDS.get(metric_key, metric_key)
+    
+    # IOM-Daten (hochgerechnet)
+    if "iom" in api_data and len(api_data["iom"]) > 0:
+        iom_entry = api_data["iom"][0]
+        value = iom_entry.get(value_field)
+        preliminary = iom_entry.get("preliminary", True)
+        return value, preliminary
+    
+    return None, True
 
 
 def check_existing_records(target_date: date) -> set:
@@ -68,22 +125,34 @@ def check_existing_records(target_date: date) -> set:
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
     
     existing_keys = set()
+    offset = None
     
     try:
-        # Alle Records für dieses Datum abrufen
-        params = {
-            "filterByFormula": f"{{Datum}} = '{target_date.isoformat()}'",
-            "fields[]": ["Unique Key"]
-        }
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            for record in data.get("records", []):
-                unique_key = record.get("fields", {}).get("Unique Key")
-                if unique_key:
-                    existing_keys.add(unique_key)
-            print(f"   → {len(existing_keys)} existierende Records für {target_date} gefunden")
+        while True:
+            params = {
+                "filterByFormula": f"{{Datum}} = '{target_date.isoformat()}'",
+                "fields[]": ["Unique Key"],
+                "pageSize": 100
+            }
+            if offset:
+                params["offset"] = offset
+                
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                for record in data.get("records", []):
+                    unique_key = record.get("fields", {}).get("Unique Key")
+                    if unique_key:
+                        existing_keys.add(unique_key)
+                
+                offset = data.get("offset")
+                if not offset:
+                    break
+            else:
+                break
+                
+        print(f"   → {len(existing_keys)} existierende Records für {target_date} gefunden")
     except Exception as e:
         print(f"   ⚠️ Fehler beim Prüfen existierender Records: {e}")
     
@@ -107,7 +176,6 @@ def save_to_airtable(records: list, existing_keys: set = None) -> dict:
             unique_key = record.get("fields", {}).get("Unique Key")
             if unique_key and unique_key in existing_keys:
                 results["skipped"] += 1
-                print(f"   ⏭️ Übersprungen (existiert): {unique_key}")
             else:
                 new_records.append(record)
         records = new_records
@@ -136,8 +204,240 @@ def save_to_airtable(records: list, existing_keys: set = None) -> dict:
     return results
 
 
+def get_historical_data(brand: str, surface: str, metric: str, weekday: int, weeks: int = 6) -> List[int]:
+    """
+    Holt historische Daten für den gleichen Wochentag der letzten X Wochen.
+    
+    Args:
+        brand: "VOL" oder "Vienna"
+        surface: "Web" oder "App"
+        metric: "Page Impressions", "Visits", etc.
+        weekday: 0=Montag, 6=Sonntag
+        weeks: Anzahl der Wochen zurück
+    
+    Returns:
+        Liste der historischen Werte
+    """
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    
+    # Formel für Airtable: Brand + Plattform + Metrik
+    formula = f"AND({{Brand}} = '{brand}', {{Plattform}} = '{surface}', {{Metrik}} = '{metric}')"
+    
+    try:
+        params = {
+            "filterByFormula": formula,
+            "fields[]": ["Datum", "Wert"],
+            "sort[0][field]": "Datum",
+            "sort[0][direction]": "desc",
+            "pageSize": 100
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        if response.status_code != 200:
+            return []
+        
+        data = response.json()
+        records = data.get("records", [])
+        
+        # Nur gleiche Wochentage filtern
+        matching_values = []
+        for record in records:
+            fields = record.get("fields", {})
+            datum_str = fields.get("Datum")
+            wert = fields.get("Wert")
+            
+            if datum_str and wert:
+                try:
+                    datum = date.fromisoformat(datum_str)
+                    if datum.weekday() == weekday:
+                        matching_values.append(wert)
+                        if len(matching_values) >= weeks:
+                            break
+                except:
+                    continue
+        
+        return matching_values
+        
+    except Exception as e:
+        print(f"   ⚠️ Fehler beim Laden historischer Daten: {e}")
+        return []
+
+
+def check_weekday_alert(current_value: int, historical_values: List[int], threshold: float = 0.10) -> Optional[Dict]:
+    """
+    Prüft ob der aktuelle Wert die Schwelle im Vergleich zum historischen Durchschnitt überschreitet.
+    
+    Args:
+        current_value: Aktueller Tageswert
+        historical_values: Werte der letzten 6 gleichen Wochentage
+        threshold: Schwellenwert (0.10 = ±10%)
+    
+    Returns:
+        Alert-Dict wenn Schwelle überschritten, sonst None
+    """
+    if len(historical_values) < 3:
+        return None  # Nicht genug historische Daten
+    
+    avg = statistics.mean(historical_values)
+    if avg == 0:
+        return None
+    
+    pct_change = (current_value - avg) / avg
+    
+    if abs(pct_change) >= threshold:
+        return {
+            "current_value": current_value,
+            "historical_avg": avg,
+            "pct_change": pct_change,
+            "direction": "up" if pct_change > 0 else "down",
+            "historical_values": historical_values
+        }
+    
+    return None
+
+
+def generate_alert_gpt_analysis(alerts: List[Dict], target_date: date) -> str:
+    """Generiert GPT-Analyse für die erkannten Alerts"""
+    if not OPENAI_API_KEY:
+        return "⚠️ GPT-Analyse nicht verfügbar (API Key fehlt)"
+    
+    weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    weekday_name = weekday_names[target_date.weekday()]
+    
+    # Alerts formatieren
+    alert_details = []
+    for a in alerts:
+        direction_icon = "📈" if a["direction"] == "up" else "📉"
+        direction_text = "über" if a["direction"] == "up" else "unter"
+        alert_details.append(
+            f"- {direction_icon} **{a['brand']} {a['surface']} {a['metric']}**: "
+            f"{a['current_value']:,} ({a['pct_change']*100:+.1f}% {direction_text} Durchschnitt)\n"
+            f"  Historische Werte ({weekday_name}): {', '.join(f'{v:,}' for v in a['historical_values'][:6])}"
+        )
+    
+    prompt = f"""Du bist ein erfahrener Web-Analytics-Experte für österreichische Medienunternehmen.
+
+KONTEXT:
+Datum: {target_date.strftime('%d.%m.%Y')} ({weekday_name})
+Es wurden signifikante Abweichungen (±10%) im Vergleich zu den letzten 6 gleichen Wochentagen erkannt.
+
+ERKANNTE ABWEICHUNGEN:
+{chr(10).join(alert_details)}
+
+DEINE AUFGABE:
+1. Analysiere die Abweichungen im Kontext (Saisonalität, Feiertage, Wochenende-Effekte)
+2. Bewerte ob der Trend (↑/↓) sich fortsetzt oder mildert
+3. Identifiziere mögliche Ursachen
+4. Gib eine kurze Handlungsempfehlung
+
+FORMAT (max. 150 Wörter):
+**🔍 ANALYSE**
+[2-3 Sätze zur Einordnung der Abweichung]
+
+**📊 TREND-BEWERTUNG**
+[1-2 Sätze zum Trend: Fortsetzung/Milderung/Stabilisierung]
+
+**💡 EMPFEHLUNG**
+[1 Satz Handlungsempfehlung]
+"""
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 400,
+                "temperature": 0.7
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            return f"⚠️ GPT-Fehler: {response.status_code}"
+    except Exception as e:
+        return f"⚠️ GPT-Fehler: {str(e)}"
+
+
+def send_alert_notification(alerts: List[Dict], analysis: str, target_date: date):
+    """Sendet Alert-Benachrichtigung an Teams"""
+    if not TEAMS_WEBHOOK_URL:
+        print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
+        return
+    
+    weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    weekday_name = weekday_names[target_date.weekday()]
+    
+    # Farbe basierend auf Schwere
+    has_critical = any(abs(a["pct_change"]) >= 0.20 for a in alerts)
+    color = "DC3545" if has_critical else "FFC107"  # Rot oder Gelb
+    
+    # Alert-Details formatieren
+    alert_lines = []
+    for a in alerts:
+        icon = "📈" if a["direction"] == "up" else "📉"
+        alert_lines.append(
+            f"{icon} **{a['brand']} {a['surface']} - {a['metric']}**: "
+            f"{a['current_value']:,} ({a['pct_change']*100:+.1f}%)"
+        )
+    
+    # Facts
+    facts = [
+        {"name": "📅 Datum", "value": f"{target_date.strftime('%d.%m.%Y')} ({weekday_name})"},
+        {"name": "🔔 Anzahl Abweichungen", "value": str(len(alerts))},
+        {"name": "📊 Vergleichsbasis", "value": f"Letzte 6 {weekday_name}e"},
+    ]
+    
+    card = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": f"ÖWA Alert - {len(alerts)} Abweichungen erkannt",
+        "themeColor": color,
+        "sections": [
+            {
+                "activityTitle": f"⚠️ ÖWA WOCHENTAGS-ALERT",
+                "activitySubtitle": f"Abweichungen über ±10% Schwelle erkannt",
+                "facts": facts,
+                "markdown": True
+            },
+            {
+                "title": "📋 Erkannte Abweichungen",
+                "text": "\n".join(alert_lines),
+                "markdown": True
+            },
+            {
+                "title": "🤖 KI-Analyse",
+                "text": analysis,
+                "markdown": True
+            }
+        ],
+        "potentialAction": [{
+            "@type": "OpenUri",
+            "name": "📈 Dashboard öffnen",
+            "targets": [{"os": "default", "uri": "https://oewa-reporter-ucgucmpvryylvvkhefxyeq.streamlit.app"}]
+        }]
+    }
+    
+    try:
+        response = requests.post(TEAMS_WEBHOOK_URL, json=card, timeout=10)
+        if response.status_code == 200:
+            print("✅ Alert-Benachrichtigung an Teams gesendet")
+        else:
+            print(f"⚠️ Teams Fehler: {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Teams Fehler: {e}")
+
+
 def send_teams_notification(message: str, title: str, color: str = "28A745"):
-    """Sendet Benachrichtigung an Teams"""
+    """Sendet einfache Benachrichtigung an Teams"""
     if not TEAMS_WEBHOOK_URL:
         print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
         return
@@ -165,9 +465,10 @@ def send_teams_notification(message: str, title: str, color: str = "28A745"):
 
 
 def main():
-    print("=" * 60)
-    print("🚀 ÖWA DAILY INGESTION")
-    print("=" * 60)
+    print("=" * 70)
+    print("🚀 ÖWA DAILY INGESTION v2.0")
+    print("   Web + App | PI + Visits + UC + Homepage PI")
+    print("=" * 70)
     
     # Konfiguration prüfen
     if not INFONLINE_API_KEY:
@@ -179,36 +480,30 @@ def main():
     
     # Gestern als Zieldatum
     target_date = date.today() - timedelta(days=1)
-    print(f"📅 Datum: {target_date.isoformat()}")
+    print(f"\n📅 Datum: {target_date.isoformat()}")
+    print(f"📅 Wochentag: {['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'][target_date.weekday()]}")
     print()
     
     records_to_create = []
     errors = []
+    ingested_data = []  # Für Alerting
     
-    # Daten von INFOnline abrufen
+    # ==========================================================================
+    # PHASE 1: Standard-Metriken für alle Sites (Web + App)
+    # ==========================================================================
+    print("=" * 70)
+    print("📊 PHASE 1: Standard-Metriken (PI, Visits, UC)")
+    print("=" * 70)
+    
     for site in SITES:
-        print(f"📊 {site['name']}...")
+        print(f"\n📊 {site['name']}...")
         for metric_key in METRICS:
             result = fetch_infonline_data(site["site_id"], metric_key, target_date)
             
             if result["success"]:
-                data = result["data"]
+                value, preliminary = extract_value(result["data"], metric_key)
                 
-                # Wert extrahieren - Format: {"metadata": {...}, "data": {"iom": [{"pis/visits": 123}]}}
-                iom_total = None
-                preliminary = True
-                
-                # Feldname basiert auf Metrik
-                value_field = "pis" if metric_key == "pageimpressions" else "visits"
-                
-                if isinstance(data, dict) and "data" in data:
-                    api_data = data["data"]
-                    if "iom" in api_data and len(api_data["iom"]) > 0:
-                        iom_entry = api_data["iom"][0]
-                        iom_total = iom_entry.get(value_field)
-                        preliminary = iom_entry.get("preliminary", True)
-                
-                if iom_total is not None:
+                if value is not None:
                     metric_name = METRICS_MAP.get(metric_key, metric_key)
                     unique_key = f"{target_date.isoformat()}_{site['brand']}_{site['surface']}_{metric_name}"
                     
@@ -218,14 +513,23 @@ def main():
                             "Brand": site["brand"],
                             "Plattform": site["surface"],
                             "Metrik": metric_name,
-                            "Wert": iom_total,
+                            "Wert": value,
                             "Site ID": site["site_id"],
                             "Vorläufig": preliminary,
                             "Erfasst am": datetime.utcnow().isoformat(),
                             "Unique Key": unique_key
                         }
                     })
-                    print(f"   ✅ {metric_name}: {iom_total:,}")
+                    
+                    # Für Alerting speichern
+                    ingested_data.append({
+                        "brand": site["brand"],
+                        "surface": site["surface"],
+                        "metric": metric_name,
+                        "value": value
+                    })
+                    
+                    print(f"   ✅ {metric_name}: {value:,}")
                 else:
                     errors.append(f"{site['name']}/{metric_key}: Kein Wert")
                     print(f"   ⚠️ {metric_key}: Kein Wert")
@@ -233,16 +537,66 @@ def main():
                 errors.append(f"{site['name']}/{metric_key}: {result['error']}")
                 print(f"   ❌ {metric_key}: {result['error']}")
     
-    print()
-    print("=" * 60)
+    # ==========================================================================
+    # PHASE 2: Homepage Page Impressions (nur Web)
+    # ==========================================================================
+    print("\n" + "=" * 70)
+    print("🏠 PHASE 2: Homepage Page Impressions")
+    print("=" * 70)
     
-    # Prüfen ob bereits Daten für dieses Datum existieren
-    print(f"🔍 Prüfe existierende Daten für {target_date}...")
+    for site in HOMEPAGE_SITES:
+        print(f"\n🏠 {site['name']}...")
+        result = fetch_infonline_data(site["site_id"], "pageimpressions", target_date)
+        
+        if result["success"]:
+            value, preliminary = extract_value(result["data"], "pageimpressions")
+            
+            if value is not None:
+                metric_name = "Homepage PI"
+                unique_key = f"{target_date.isoformat()}_{site['brand']}_{site['surface']}_{metric_name}"
+                
+                records_to_create.append({
+                    "fields": {
+                        "Datum": target_date.isoformat(),
+                        "Brand": site["brand"],
+                        "Plattform": site["surface"],
+                        "Metrik": metric_name,
+                        "Wert": value,
+                        "Site ID": site["site_id"],
+                        "Vorläufig": preliminary,
+                        "Erfasst am": datetime.utcnow().isoformat(),
+                        "Unique Key": unique_key
+                    }
+                })
+                
+                # Für Alerting speichern
+                ingested_data.append({
+                    "brand": site["brand"],
+                    "surface": site["surface"],
+                    "metric": metric_name,
+                    "value": value
+                })
+                
+                print(f"   ✅ Homepage PI: {value:,}")
+            else:
+                errors.append(f"{site['name']}/Homepage PI: Kein Wert")
+                print(f"   ⚠️ Homepage PI: Kein Wert")
+        else:
+            errors.append(f"{site['name']}/Homepage PI: {result['error']}")
+            print(f"   ❌ Homepage PI: {result['error']}")
+    
+    # ==========================================================================
+    # PHASE 3: In Airtable speichern
+    # ==========================================================================
+    print("\n" + "=" * 70)
+    print("💾 PHASE 3: Airtable-Speicherung")
+    print("=" * 70)
+    
+    print(f"\n🔍 Prüfe existierende Daten für {target_date}...")
     existing_keys = check_existing_records(target_date)
     
-    # In Airtable speichern (mit Duplikat-Prüfung)
     if records_to_create:
-        print(f"💾 Speichere {len(records_to_create)} Datensätze in Airtable...")
+        print(f"\n💾 Speichere {len(records_to_create)} Datensätze in Airtable...")
         save_result = save_to_airtable(records_to_create, existing_keys)
         print(f"   ✅ Erstellt: {save_result['created']}")
         if save_result.get("skipped", 0) > 0:
@@ -252,12 +606,81 @@ def main():
                 print(f"   ❌ {err}")
                 errors.append(err)
     
-    print()
+    # ==========================================================================
+    # PHASE 4: Wochentags-Alerting
+    # ==========================================================================
+    print("\n" + "=" * 70)
+    print("🔔 PHASE 4: Wochentags-Alerting (±10% Schwelle)")
+    print("=" * 70)
     
-    # Teams Benachrichtigung
+    weekday = target_date.weekday()
+    all_alerts = []
+    
+    for data_point in ingested_data:
+        # Historische Daten für gleichen Wochentag laden
+        historical = get_historical_data(
+            brand=data_point["brand"],
+            surface=data_point["surface"],
+            metric=data_point["metric"],
+            weekday=weekday,
+            weeks=6
+        )
+        
+        if len(historical) >= 3:
+            alert = check_weekday_alert(
+                current_value=data_point["value"],
+                historical_values=historical,
+                threshold=ALERT_THRESHOLD_PCT
+            )
+            
+            if alert:
+                alert["brand"] = data_point["brand"]
+                alert["surface"] = data_point["surface"]
+                alert["metric"] = data_point["metric"]
+                all_alerts.append(alert)
+                
+                direction = "↑" if alert["direction"] == "up" else "↓"
+                print(f"   ⚠️ {data_point['brand']} {data_point['surface']} {data_point['metric']}: "
+                      f"{alert['pct_change']*100:+.1f}% {direction}")
+            else:
+                print(f"   ✅ {data_point['brand']} {data_point['surface']} {data_point['metric']}: OK")
+        else:
+            print(f"   ℹ️ {data_point['brand']} {data_point['surface']} {data_point['metric']}: "
+                  f"Nicht genug historische Daten ({len(historical)}/3)")
+    
+    # ==========================================================================
+    # PHASE 5: Alert-Benachrichtigung (nur wenn Schwelle überschritten)
+    # ==========================================================================
+    if all_alerts:
+        print("\n" + "=" * 70)
+        print(f"🚨 {len(all_alerts)} ABWEICHUNGEN ERKANNT - Sende Alert")
+        print("=" * 70)
+        
+        # GPT-Analyse generieren
+        print("\n🤖 Generiere KI-Analyse...")
+        analysis = generate_alert_gpt_analysis(all_alerts, target_date)
+        print(f"   → {len(analysis)} Zeichen generiert")
+        
+        # Alert an Teams senden
+        print("\n📤 Sende Alert an Teams...")
+        send_alert_notification(all_alerts, analysis, target_date)
+    else:
+        print("\n✅ Keine Abweichungen über ±10% - Kein Alert nötig")
+    
+    # ==========================================================================
+    # PHASE 6: Zusammenfassung
+    # ==========================================================================
+    print("\n" + "=" * 70)
+    print("📋 ZUSAMMENFASSUNG")
+    print("=" * 70)
+    
     status = "✅ Erfolgreich" if not errors else "⚠️ Mit Fehlern"
+    
+    # Nur einfache Status-Nachricht (kein Alert-Inhalt)
     message = f"""**Datum:** {target_date.strftime('%d.%m.%Y')}
 **Datensätze:** {len(records_to_create)}
+**Erstellt:** {save_result.get('created', 0)} | **Übersprungen:** {save_result.get('skipped', 0)}
+**Alerts:** {len(all_alerts)} Abweichungen erkannt
 **Status:** {status}"""
     
     if errors:
@@ -269,11 +692,10 @@ def main():
         color="28A745" if not errors else "FFC107"
     )
     
-    print("=" * 60)
-    print("✅ DAILY INGESTION ABGESCHLOSSEN")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("✅ DAILY INGESTION v2.0 ABGESCHLOSSEN")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
     main()
-

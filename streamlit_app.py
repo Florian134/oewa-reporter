@@ -353,6 +353,14 @@ brands = df_filtered["brand"].dropna().unique().tolist()
 selected_brands = st.sidebar.multiselect("Brands", brands, default=brands)
 df_filtered = df_filtered[df_filtered["brand"].isin(selected_brands)]
 
+# Sidebar platform filter (NEU: Web/App)
+platforms = df_filtered["plattform"].dropna().unique().tolist()
+if len(platforms) > 1:
+    selected_platforms = st.sidebar.multiselect("Plattform", platforms, default=platforms)
+    df_filtered = df_filtered[df_filtered["plattform"].isin(selected_platforms)]
+else:
+    selected_platforms = platforms
+
 # Sidebar metric filter
 metrics = df_filtered["metrik"].dropna().unique().tolist()
 selected_metrics = st.sidebar.multiselect("Metriken", metrics, default=metrics)
@@ -391,14 +399,20 @@ colors_comparison = {"VOL": "#93C5FD", "Vienna": "#C4B5FD"}
 # =============================================================================
 st.subheader("📈 Kennzahlen")
 
-col1, col2, col3, col4 = st.columns(4)
-
-# Calculate KPIs
+# Calculate all KPIs (erweitert für UC und HP-PI)
 pi_total = df_filtered[df_filtered["metrik"] == "Page Impressions"]["wert"].sum()
 visits_total = df_filtered[df_filtered["metrik"] == "Visits"]["wert"].sum()
+uc_total = df_filtered[df_filtered["metrik"] == "Unique Clients"]["wert"].sum()
+hp_pi_total = df_filtered[df_filtered["metrik"] == "Homepage PI"]["wert"].sum()
+
 days = (end_date - start_date).days or 1
 pi_avg = pi_total / days
 visits_avg = visits_total / days
+uc_avg = uc_total / days
+hp_pi_avg = hp_pi_total / days
+
+# Erste Zeile: PI und Visits
+col1, col2, col3, col4 = st.columns(4)
 
 # Calculate period-over-period change using the comparison period from sidebar
 if prev_start is not None and prev_end is not None:
@@ -473,6 +487,38 @@ with col4:
         label="Ø Visits / Tag",
         value=f"{visits_avg:,.0f}".replace(",", ".")
     )
+
+# Zweite Zeile: UC und HP-PI (wenn Daten vorhanden)
+if uc_total > 0 or hp_pi_total > 0:
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        if uc_total > 0:
+            st.metric(
+                label="Unique Clients (Gesamt)",
+                value=f"{uc_total:,.0f}".replace(",", ".")
+            )
+    
+    with col6:
+        if hp_pi_total > 0:
+            st.metric(
+                label="Homepage PI (Gesamt)",
+                value=f"{hp_pi_total:,.0f}".replace(",", ".")
+            )
+    
+    with col7:
+        if uc_total > 0:
+            st.metric(
+                label="Ø Unique Clients / Tag",
+                value=f"{uc_avg:,.0f}".replace(",", ".")
+            )
+    
+    with col8:
+        if hp_pi_total > 0:
+            st.metric(
+                label="Ø Homepage PI / Tag",
+                value=f"{hp_pi_avg:,.0f}".replace(",", ".")
+            )
 
 # =============================================================================
 # TABS
