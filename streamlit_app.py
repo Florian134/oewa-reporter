@@ -383,7 +383,8 @@ if prev_start is not None and prev_end is not None:
         (df["datum"].dt.date >= prev_start) & 
         (df["datum"].dt.date <= prev_end) &
         (df["brand"].isin(selected_brands)) &
-        (df["metrik"].isin(selected_metrics))
+        (df["metrik"].isin(selected_metrics)) &
+        (df["plattform"].isin(selected_platforms))
     ]
     has_comparison = len(df_prev) > 0
 else:
@@ -416,12 +417,13 @@ col1, col2, col3, col4 = st.columns(4)
 
 # Calculate period-over-period change using the comparison period from sidebar
 if prev_start is not None and prev_end is not None:
-    # Gleiche Filter wie Hauptauswahl (brands UND metrics)
+    # Gleiche Filter wie Hauptauswahl (brands, metrics UND platforms)
     df_prev = df[
         (df["datum"].dt.date >= prev_start) & 
         (df["datum"].dt.date <= prev_end) &
         (df["brand"].isin(selected_brands)) &
-        (df["metrik"].isin(selected_metrics))
+        (df["metrik"].isin(selected_metrics)) &
+        (df["plattform"].isin(selected_platforms))
     ]
     
     # Berechne Vergleichsdaten
@@ -490,20 +492,42 @@ with col4:
 
 # Zweite Zeile: UC und HP-PI (wenn Daten vorhanden)
 if uc_total > 0 or hp_pi_total > 0:
+    # Berechne Vergleichsdaten für UC und HP-PI
+    if prev_start is not None and prev_end is not None:
+        uc_prev = df_prev[df_prev["metrik"] == "Unique Clients"]["wert"].sum()
+        hp_pi_prev = df_prev[df_prev["metrik"] == "Homepage PI"]["wert"].sum()
+        
+        if uc_prev > 0:
+            uc_change = ((uc_total - uc_prev) / uc_prev * 100)
+            uc_delta_text = f"{uc_change:+.1f}% {period_label}"
+        else:
+            uc_delta_text = "↑ Keine Vergleichsdaten"
+        
+        if hp_pi_prev > 0:
+            hp_pi_change = ((hp_pi_total - hp_pi_prev) / hp_pi_prev * 100)
+            hp_pi_delta_text = f"{hp_pi_change:+.1f}% {period_label}"
+        else:
+            hp_pi_delta_text = "↑ Keine Vergleichsdaten"
+    else:
+        uc_delta_text = None
+        hp_pi_delta_text = None
+    
     col5, col6, col7, col8 = st.columns(4)
     
     with col5:
         if uc_total > 0:
             st.metric(
                 label="Unique Clients (Gesamt)",
-                value=f"{uc_total:,.0f}".replace(",", ".")
+                value=f"{uc_total:,.0f}".replace(",", "."),
+                delta=uc_delta_text
             )
     
     with col6:
         if hp_pi_total > 0:
             st.metric(
                 label="Homepage PI (Gesamt)",
-                value=f"{hp_pi_total:,.0f}".replace(",", ".")
+                value=f"{hp_pi_total:,.0f}".replace(",", "."),
+                delta=hp_pi_delta_text
             )
     
     with col7:
@@ -547,64 +571,55 @@ with tab1:
     else:
         brand_combined = brand_summary
     
-    col1, col2 = st.columns(2)
+    # Dynamische Diagramme für alle ausgewählten Metriken
+    # Farben pro Metrik
+    metric_colors = {
+        "Page Impressions": {"Aktuell": "#3B82F6", "Vergleich": "#93C5FD"},
+        "Visits": {"Aktuell": "#8B5CF6", "Vergleich": "#C4B5FD"},
+        "Unique Clients": {"Aktuell": "#10B981", "Vergleich": "#6EE7B7"},
+        "Homepage PI": {"Aktuell": "#F59E0B", "Vergleich": "#FCD34D"}
+    }
     
-    with col1:
-        pi_data = brand_combined[brand_combined["metrik"] == "Page Impressions"]
-        if not pi_data.empty:
-            if has_comparison:
-                # Gruppierte Balken: Aktuell vs Vergleich
-                fig_pi = px.bar(
-                    pi_data,
-                    x="brand",
-                    y="wert",
-                    color="periode",
-                    barmode="group",
-                    title="Page Impressions nach Brand",
-                    color_discrete_map={"Aktuell": "#3B82F6", "Vergleich": "#93C5FD"}
-                )
-            else:
-                fig_pi = px.bar(
-                    pi_data,
-                    x="brand",
-                    y="wert",
-                    color="brand",
-                    title="Page Impressions nach Brand",
-                    color_discrete_map=colors_current
-                )
-                fig_pi.update_layout(showlegend=False)
-            fig_pi.update_layout(yaxis=dict(tickformat=","))
-            st.plotly_chart(fig_pi, use_container_width=True)
-        else:
-            st.info("Keine Page Impressions Daten für den ausgewählten Zeitraum.")
+    # Metriken in der richtigen Reihenfolge anzeigen
+    metric_order = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
+    available_metrics = [m for m in metric_order if m in selected_metrics]
     
-    with col2:
-        visits_data = brand_combined[brand_combined["metrik"] == "Visits"]
-        if not visits_data.empty:
-            if has_comparison:
-                fig_visits = px.bar(
-                    visits_data,
-                    x="brand",
-                    y="wert",
-                    color="periode",
-                    barmode="group",
-                    title="Visits nach Brand",
-                    color_discrete_map={"Aktuell": "#8B5CF6", "Vergleich": "#C4B5FD"}
-                )
-            else:
-                fig_visits = px.bar(
-                    visits_data,
-                    x="brand",
-                    y="wert",
-                    color="brand",
-                    title="Visits nach Brand",
-                    color_discrete_map=colors_current
-                )
-                fig_visits.update_layout(showlegend=False)
-            fig_visits.update_layout(yaxis=dict(tickformat=","))
-            st.plotly_chart(fig_visits, use_container_width=True)
-        else:
-            st.info("Keine Visits Daten für den ausgewählten Zeitraum.")
+    # Anzahl der Spalten bestimmen (max 2 pro Zeile)
+    if len(available_metrics) > 0:
+        for i in range(0, len(available_metrics), 2):
+            cols = st.columns(2)
+            for j, metric in enumerate(available_metrics[i:i+2]):
+                metric_data = brand_combined[brand_combined["metrik"] == metric]
+                colors_for_metric = metric_colors.get(metric, {"Aktuell": "#666", "Vergleich": "#999"})
+                
+                with cols[j]:
+                    if not metric_data.empty:
+                        if has_comparison:
+                            fig = px.bar(
+                                metric_data,
+                                x="brand",
+                                y="wert",
+                                color="periode",
+                                barmode="group",
+                                title=f"{metric} nach Brand",
+                                color_discrete_map=colors_for_metric
+                            )
+                        else:
+                            fig = px.bar(
+                                metric_data,
+                                x="brand",
+                                y="wert",
+                                color="brand",
+                                title=f"{metric} nach Brand",
+                                color_discrete_map=colors_current
+                            )
+                            fig.update_layout(showlegend=False)
+                        fig.update_layout(yaxis=dict(tickformat=","))
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info(f"Keine {metric} Daten für den ausgewählten Zeitraum.")
+    else:
+        st.info("Keine Metriken ausgewählt.")
     
     # Wochentags-Analyse nach Brand (VOL vs Vienna)
     st.subheader("📅 Wochentags-Analyse nach Property")
@@ -647,90 +662,63 @@ with tab1:
         }
     
     if not weekday_avg.empty:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            pi_weekday = weekday_avg[weekday_avg["metrik"] == "Page Impressions"]
-            if not pi_weekday.empty:
-                if has_comparison:
-                    fig_pi_week = px.bar(
-                        pi_weekday,
-                        x="wochentag_de",
-                        y="wert",
-                        color="brand_periode",
-                        barmode="group",
-                        title="Ø Page Impressions pro Wochentag",
-                        color_discrete_map=brand_periode_colors,
-                        category_orders={"brand_periode": ["VOL Aktuell", "VOL Vergleich", "Vienna Aktuell", "Vienna Vergleich"]}
-                    )
-                else:
-                    fig_pi_week = px.bar(
-                        pi_weekday,
-                        x="wochentag_de",
-                        y="wert",
-                        color="brand",
-                        barmode="group",
-                        title="Ø Page Impressions pro Wochentag",
-                        color_discrete_map=colors_current
-                    )
-                fig_pi_week.update_layout(
-                    yaxis=dict(tickformat=","),
-                    xaxis_title="",
-                    legend_title="Property",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                st.plotly_chart(fig_pi_week, use_container_width=True)
-        
-        with col2:
-            visits_weekday = weekday_avg[weekday_avg["metrik"] == "Visits"]
-            if not visits_weekday.empty:
-                if has_comparison:
-                    fig_visits_week = px.bar(
-                        visits_weekday,
-                        x="wochentag_de",
-                        y="wert",
-                        color="brand_periode",
-                        barmode="group",
-                        title="Ø Visits pro Wochentag",
-                        color_discrete_map=brand_periode_colors,
-                        category_orders={"brand_periode": ["VOL Aktuell", "VOL Vergleich", "Vienna Aktuell", "Vienna Vergleich"]}
-                    )
-                else:
-                    fig_visits_week = px.bar(
-                        visits_weekday,
-                        x="wochentag_de",
-                        y="wert",
-                        color="brand",
-                        barmode="group",
-                        title="Ø Visits pro Wochentag",
-                        color_discrete_map=colors_current
-                    )
-                fig_visits_week.update_layout(
-                    yaxis=dict(tickformat=","),
-                    xaxis_title="",
-                    legend_title="Property",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                st.plotly_chart(fig_visits_week, use_container_width=True)
+        # Dynamische Wochentags-Diagramme für alle ausgewählten Metriken
+        for i in range(0, len(available_metrics), 2):
+            cols = st.columns(2)
+            for j, metric in enumerate(available_metrics[i:i+2]):
+                metric_weekday = weekday_avg[weekday_avg["metrik"] == metric]
+                
+                with cols[j]:
+                    if not metric_weekday.empty:
+                        if has_comparison:
+                            fig_week = px.bar(
+                                metric_weekday,
+                                x="wochentag_de",
+                                y="wert",
+                                color="brand_periode",
+                                barmode="group",
+                                title=f"Ø {metric} pro Wochentag",
+                                color_discrete_map=brand_periode_colors,
+                                category_orders={"brand_periode": ["VOL Aktuell", "VOL Vergleich", "Vienna Aktuell", "Vienna Vergleich"]}
+                            )
+                        else:
+                            fig_week = px.bar(
+                                metric_weekday,
+                                x="wochentag_de",
+                                y="wert",
+                                color="brand",
+                                barmode="group",
+                                title=f"Ø {metric} pro Wochentag",
+                                color_discrete_map=colors_current
+                            )
+                        fig_week.update_layout(
+                            yaxis=dict(tickformat=","),
+                            xaxis_title="",
+                            legend_title="Property",
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        st.plotly_chart(fig_week, use_container_width=True)
         
         # Insights: Bester und schlechtester Tag PRO BRAND (nur für aktuellen Zeitraum)
-        st.markdown("**📈 Erkenntnisse (Page Impressions - Aktueller Zeitraum):**")
+        # Verwende die erste verfügbare Metrik für Insights
+        primary_metric = available_metrics[0] if available_metrics else "Page Impressions"
+        st.markdown(f"**📈 Erkenntnisse ({primary_metric} - Aktueller Zeitraum):**")
         
         # Nur aktuelle Periode für Insights
-        pi_data = weekday_avg[(weekday_avg["metrik"] == "Page Impressions") & (weekday_avg["periode"] == "Aktuell")]
-        if not pi_data.empty:
-            unique_brands = pi_data["brand"].unique()
-            insights_cols = st.columns(len(unique_brands))
+        insight_data = weekday_avg[(weekday_avg["metrik"] == primary_metric) & (weekday_avg["periode"] == "Aktuell")]
+        if not insight_data.empty:
+            unique_brands = insight_data["brand"].unique()
+            insights_cols = st.columns(len(unique_brands)) if len(unique_brands) > 0 else [st]
             
             for idx, brand in enumerate(sorted(unique_brands)):
-                brand_data = pi_data[pi_data["brand"] == brand]
+                brand_data = insight_data[insight_data["brand"] == brand]
                 if not brand_data.empty:
                     best_day = brand_data.loc[brand_data["wert"].idxmax()]
                     worst_day = brand_data.loc[brand_data["wert"].idxmin()]
                     avg_brand = brand_data["wert"].mean()
                     
-                    best_pct = ((best_day["wert"] - avg_brand) / avg_brand * 100)
-                    worst_pct = ((worst_day["wert"] - avg_brand) / avg_brand * 100)
+                    best_pct = ((best_day["wert"] - avg_brand) / avg_brand * 100) if avg_brand > 0 else 0
+                    worst_pct = ((worst_day["wert"] - avg_brand) / avg_brand * 100) if avg_brand > 0 else 0
                     
                     brand_color = "#3B82F6" if brand == "VOL" else "#8B5CF6"
                     
@@ -821,7 +809,8 @@ with tab3:
     if daily.empty:
         st.info("Keine Daten für den ausgewählten Zeitraum.")
     else:
-        for metrik in ["Page Impressions", "Visits"]:
+        # Dynamische Zeitreihen für alle ausgewählten Metriken
+        for metrik in selected_metrics:
             metric_data = daily[daily["metrik"] == metrik].sort_values("datum_tag")
             
             if metric_data.empty:
