@@ -777,9 +777,17 @@ with tab2:
 with tab3:
     st.subheader("📈 Zeitreihen-Analyse nach Property")
     
-    # Vergleichsinfo anzeigen
-    if has_comparison:
-        st.info(f"📅 Vergleich: **Durchgezogen** = Aktuell ({start_date.strftime('%d.%m.')}-{end_date.strftime('%d.%m.')}) | **Gestrichelt** = Vorperiode ({prev_start.strftime('%d.%m.')}-{prev_end.strftime('%d.%m.')})")
+    # Aggregationsauswahl: Tag oder Monat
+    col_agg1, col_agg2 = st.columns([1, 3])
+    with col_agg1:
+        aggregation_mode = st.radio(
+            "Aggregation",
+            ["📅 Tagesansicht", "📆 Monatsansicht"],
+            index=0,
+            horizontal=True
+        )
+    
+    is_monthly = aggregation_mode == "📆 Monatsansicht"
     
     # Farben für Properties
     property_colors = {
@@ -787,106 +795,245 @@ with tab3:
         "Vienna": {"current": "#8B5CF6", "comparison": "#C4B5FD"}    # Lila
     }
     
-    # Daten pro Tag UND Brand aggregieren - Aktueller Zeitraum
-    daily = df_filtered.copy()
-    daily["datum_tag"] = daily["datum"].dt.date
-    daily = daily.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
-    daily["datum_tag"] = pd.to_datetime(daily["datum_tag"])
-    daily["periode"] = "Aktuell"
-    
-    # Vergleichszeitraum vorbereiten (Daten auf X-Achse des aktuellen Zeitraums verschieben)
-    if has_comparison:
-        daily_prev = df_prev.copy()
-        daily_prev["datum_tag"] = daily_prev["datum"].dt.date
-        daily_prev = daily_prev.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
-        daily_prev["datum_tag"] = pd.to_datetime(daily_prev["datum_tag"])
-        daily_prev["periode"] = "Vergleich"
+    if is_monthly:
+        # =====================================================================
+        # MONATSANSICHT
+        # =====================================================================
+        st.info("📆 **Monatsansicht:** Daten werden pro Monat aggregiert und mit dem Vormonat verglichen.")
         
-        # Verschiebung berechnen: Vergleichsdaten auf X-Achse des aktuellen Zeitraums mappen
-        day_offset = (pd.Timestamp(start_date) - pd.Timestamp(prev_start)).days
-        daily_prev["datum_tag_shifted"] = daily_prev["datum_tag"] + pd.Timedelta(days=day_offset)
-    
-    if daily.empty:
-        st.info("Keine Daten für den ausgewählten Zeitraum.")
-    else:
-        # Dynamische Zeitreihen für alle ausgewählten Metriken
-        for metrik in selected_metrics:
-            metric_data = daily[daily["metrik"] == metrik].sort_values("datum_tag")
+        # Alle verfügbaren Daten nach Monat gruppieren
+        monthly_all = df[
+            (df["brand"].isin(selected_brands)) &
+            (df["metrik"].isin(selected_metrics)) &
+            (df["plattform"].isin(selected_platforms))
+        ].copy()
+        
+        if monthly_all.empty:
+            st.warning("Keine Daten für die ausgewählten Filter verfügbar.")
+        else:
+            monthly_all["monat"] = monthly_all["datum"].dt.to_period("M")
+            monthly_all["monat_start"] = monthly_all["monat"].dt.to_timestamp()
+            monthly_all["monat_label"] = monthly_all["datum"].dt.strftime("%b %Y")
             
-            if metric_data.empty:
-                st.info(f"Keine {metrik} Daten verfügbar.")
-                continue
+            # Pro Monat, Metrik und Brand aggregieren
+            monthly_agg = monthly_all.groupby(["monat_start", "monat_label", "metrik", "brand"])["wert"].sum().reset_index()
+            monthly_agg = monthly_agg.sort_values("monat_start")
             
-            fig = go.Figure()
-            
-            # Für jede Property (Brand) eine eigene Linie
-            for brand in ["VOL", "Vienna"]:
-                brand_data = metric_data[metric_data["brand"] == brand].copy()
-                colors = property_colors.get(brand, {"current": "#666", "comparison": "#999"})
+            # Für jede Metrik ein Diagramm
+            for metrik in selected_metrics:
+                metric_data = monthly_agg[monthly_agg["metrik"] == metrik]
                 
-                if not brand_data.empty:
-                    brand_data = brand_data.sort_values("datum_tag")
-                    
-                    # Aktueller Zeitraum - Kräftige durchgezogene Linie
-                    fig.add_trace(go.Scatter(
-                        x=brand_data["datum_tag"],
-                        y=brand_data["wert"],
-                        mode="lines+markers",
-                        name=f"{brand} Aktuell",
-                        line=dict(color=colors["current"], width=2),
-                        marker=dict(size=6),
-                        legendgroup=f"{brand}_current"
-                    ))
+                if metric_data.empty:
+                    st.info(f"Keine {metrik} Monatsdaten verfügbar.")
+                    continue
                 
-                # Vergleichszeitraum hinzufügen wenn verfügbar
-                if has_comparison:
-                    metric_data_prev = daily_prev[daily_prev["metrik"] == metrik]
-                    brand_data_prev = metric_data_prev[metric_data_prev["brand"] == brand].copy()
+                fig = go.Figure()
+                
+                for brand in ["VOL", "Vienna"]:
+                    brand_data = metric_data[metric_data["brand"] == brand].copy()
+                    colors = property_colors.get(brand, {"current": "#666", "comparison": "#999"})
                     
-                    if not brand_data_prev.empty:
-                        brand_data_prev = brand_data_prev.sort_values("datum_tag_shifted")
+                    if not brand_data.empty:
+                        brand_data = brand_data.sort_values("monat_start")
                         
-                        # Vergleichszeitraum - Gestrichelte hellere Linie
+                        # Berechne MoM-Änderung für Tooltip
+                        brand_data["mom_change"] = brand_data["wert"].pct_change() * 100
+                        brand_data["mom_text"] = brand_data["mom_change"].apply(
+                            lambda x: f" ({x:+.1f}% MoM)" if pd.notna(x) else ""
+                        )
+                        
                         fig.add_trace(go.Scatter(
-                            x=brand_data_prev["datum_tag_shifted"],
-                            y=brand_data_prev["wert"],
+                            x=brand_data["monat_start"],
+                            y=brand_data["wert"],
                             mode="lines+markers",
-                            name=f"{brand} Vergleich",
-                            line=dict(color=colors["comparison"], width=2, dash="dash"),
-                            marker=dict(size=4, symbol="diamond"),
-                            legendgroup=f"{brand}_comparison",
-                            opacity=0.8
+                            name=f"{brand}",
+                            line=dict(color=colors["current"], width=3),
+                            marker=dict(size=10),
+                            text=brand_data["wert"].apply(lambda x: f"{x:,.0f}".replace(",", ".")),
+                            hovertemplate=f"<b>{brand}</b><br>" +
+                                          "%{x|%B %Y}<br>" +
+                                          "Wert: %{text}<br>" +
+                                          "<extra></extra>"
                         ))
+                        
+                        # Füge MoM-Balken als sekundäre Darstellung hinzu
+                        if len(brand_data) > 1:
+                            # Erstelle einen separaten Trace für MoM-Änderungen
+                            mom_data = brand_data[brand_data["mom_change"].notna()]
+                            if not mom_data.empty:
+                                bar_colors = ["#10B981" if x >= 0 else "#EF4444" for x in mom_data["mom_change"]]
+                                fig.add_trace(go.Bar(
+                                    x=mom_data["monat_start"],
+                                    y=mom_data["mom_change"],
+                                    name=f"{brand} MoM %",
+                                    marker_color=bar_colors,
+                                    opacity=0.3,
+                                    yaxis="y2",
+                                    showlegend=False,
+                                    hovertemplate=f"<b>{brand} MoM</b><br>" +
+                                                  "%{x|%B %Y}<br>" +
+                                                  "%{y:+.1f}%<br>" +
+                                                  "<extra></extra>"
+                                ))
+                
+                fig.update_layout(
+                    title=f"{metrik} - Monatstrend (mit MoM-Veränderung)",
+                    yaxis=dict(
+                        title="Wert",
+                        tickformat=",",
+                        side="left"
+                    ),
+                    yaxis2=dict(
+                        title="MoM %",
+                        overlaying="y",
+                        side="right",
+                        showgrid=False,
+                        zeroline=True,
+                        zerolinecolor="#999",
+                        range=[-50, 50]  # Prozent-Bereich
+                    ),
+                    xaxis=dict(
+                        tickformat="%b %Y",
+                        dtick="M1",
+                        tickangle=-45
+                    ),
+                    xaxis_title="Monat",
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    hovermode="x unified",
+                    barmode="group"
+                )
+                st.plotly_chart(fig, use_container_width=True)
             
-            fig.update_layout(
-                title=f"{metrik} - Trend nach Property" + (" (mit Vergleichszeitraum)" if has_comparison else ""),
-                yaxis_tickformat=",",
-                xaxis=dict(
-                    tickformat="%d.%m.",
-                    dtick="D1",
-                    tickangle=-45
-                ),
-                xaxis_title="Datum",
-                yaxis_title="Wert",
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                hovermode="x unified"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            # MoM-Tabelle
+            st.markdown("### 📊 Monatsvergleich (MoM)")
+            
+            # Pivot-Tabelle erstellen
+            pivot_data = monthly_agg.pivot_table(
+                index=["monat_start", "monat_label"],
+                columns=["brand", "metrik"],
+                values="wert",
+                aggfunc="sum"
+            ).reset_index()
+            
+            if not pivot_data.empty:
+                pivot_data = pivot_data.sort_values("monat_start", ascending=False)
+                pivot_data["monat_start"] = pivot_data["monat_start"].dt.strftime("%Y-%m")
+                st.dataframe(pivot_data.head(12), use_container_width=True)
+    
+    else:
+        # =====================================================================
+        # TAGESANSICHT (bestehender Code)
+        # =====================================================================
+        # Vergleichsinfo anzeigen
+        if has_comparison:
+            st.info(f"📅 Vergleich: **Durchgezogen** = Aktuell ({start_date.strftime('%d.%m.')}-{end_date.strftime('%d.%m.')}) | **Gestrichelt** = Vorperiode ({prev_start.strftime('%d.%m.')}-{prev_end.strftime('%d.%m.')})")
         
-        # Erkenntnisse-Box
-        st.markdown("---")
-        st.markdown("### 📊 Legende")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("🔵 **VOL.AT** - Vorarlberg Online")
-        with col2:
-            st.markdown("🟣 **VIENNA.AT** - Wien Online")
+        # Daten pro Tag UND Brand aggregieren - Aktueller Zeitraum
+        daily = df_filtered.copy()
+        daily["datum_tag"] = daily["datum"].dt.date
+        daily = daily.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
+        daily["datum_tag"] = pd.to_datetime(daily["datum_tag"])
+        daily["periode"] = "Aktuell"
+        
+        # Vergleichszeitraum vorbereiten (Daten auf X-Achse des aktuellen Zeitraums verschieben)
+        if has_comparison:
+            daily_prev = df_prev.copy()
+            daily_prev["datum_tag"] = daily_prev["datum"].dt.date
+            daily_prev = daily_prev.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
+            daily_prev["datum_tag"] = pd.to_datetime(daily_prev["datum_tag"])
+            daily_prev["periode"] = "Vergleich"
+            
+            # Verschiebung berechnen: Vergleichsdaten auf X-Achse des aktuellen Zeitraums mappen
+            day_offset = (pd.Timestamp(start_date) - pd.Timestamp(prev_start)).days
+            daily_prev["datum_tag_shifted"] = daily_prev["datum_tag"] + pd.Timedelta(days=day_offset)
+        
+        if daily.empty:
+            st.info("Keine Daten für den ausgewählten Zeitraum.")
+        else:
+            # Dynamische Zeitreihen für alle ausgewählten Metriken
+            for metrik in selected_metrics:
+                metric_data = daily[daily["metrik"] == metrik].sort_values("datum_tag")
+                
+                if metric_data.empty:
+                    st.info(f"Keine {metrik} Daten verfügbar.")
+                    continue
+                
+                fig = go.Figure()
+                
+                # Für jede Property (Brand) eine eigene Linie
+                for brand in ["VOL", "Vienna"]:
+                    brand_data = metric_data[metric_data["brand"] == brand].copy()
+                    colors = property_colors.get(brand, {"current": "#666", "comparison": "#999"})
+                    
+                    if not brand_data.empty:
+                        brand_data = brand_data.sort_values("datum_tag")
+                        
+                        # Aktueller Zeitraum - Kräftige durchgezogene Linie
+                        fig.add_trace(go.Scatter(
+                            x=brand_data["datum_tag"],
+                            y=brand_data["wert"],
+                            mode="lines+markers",
+                            name=f"{brand} Aktuell",
+                            line=dict(color=colors["current"], width=2),
+                            marker=dict(size=6),
+                            legendgroup=f"{brand}_current"
+                        ))
+                    
+                    # Vergleichszeitraum hinzufügen wenn verfügbar
+                    if has_comparison:
+                        metric_data_prev = daily_prev[daily_prev["metrik"] == metrik]
+                        brand_data_prev = metric_data_prev[metric_data_prev["brand"] == brand].copy()
+                        
+                        if not brand_data_prev.empty:
+                            brand_data_prev = brand_data_prev.sort_values("datum_tag_shifted")
+                            
+                            # Vergleichszeitraum - Gestrichelte hellere Linie
+                            fig.add_trace(go.Scatter(
+                                x=brand_data_prev["datum_tag_shifted"],
+                                y=brand_data_prev["wert"],
+                                mode="lines+markers",
+                                name=f"{brand} Vergleich",
+                                line=dict(color=colors["comparison"], width=2, dash="dash"),
+                                marker=dict(size=4, symbol="diamond"),
+                                legendgroup=f"{brand}_comparison",
+                                opacity=0.8
+                            ))
+                
+                fig.update_layout(
+                    title=f"{metrik} - Trend nach Property" + (" (mit Vergleichszeitraum)" if has_comparison else ""),
+                    yaxis_tickformat=",",
+                    xaxis=dict(
+                        tickformat="%d.%m.",
+                        dtick="D1",
+                        tickangle=-45
+                    ),
+                    xaxis_title="Datum",
+                    yaxis_title="Wert",
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # Erkenntnisse-Box
+    st.markdown("---")
+    st.markdown("### 📊 Legende")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("🔵 **VOL.AT** - Vorarlberg Online")
+    with col2:
+        st.markdown("🟣 **VIENNA.AT** - Wien Online")
 
 # =============================================================================
 # FOOTER
