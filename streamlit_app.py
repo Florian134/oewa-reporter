@@ -799,7 +799,10 @@ with tab3:
         # =====================================================================
         # MONATSANSICHT
         # =====================================================================
-        st.info("📆 **Monatsansicht:** Daten werden pro Monat aggregiert und mit dem Vormonat verglichen.")
+        st.info("📆 **Monatsansicht:** Daten werden pro Monat aggregiert. Die Balken zeigen die **Veränderung zum Vormonat** (MoM).")
+        
+        # Hinweis zu YoY
+        st.caption("ℹ️ *Year-over-Year (YoY) Vergleiche werden verfügbar sein, sobald Daten für mindestens 12 Monate vorliegen (voraussichtlich ab Juni 2026).*")
         
         # Alle verfügbaren Daten nach Monat gruppieren
         monthly_all = df[
@@ -836,11 +839,11 @@ with tab3:
                     if not brand_data.empty:
                         brand_data = brand_data.sort_values("monat_start")
                         
-                        # Berechne MoM-Änderung für Tooltip
+                        # Berechne MoM-Änderung
                         brand_data["mom_change"] = brand_data["wert"].pct_change() * 100
-                        brand_data["mom_text"] = brand_data["mom_change"].apply(
-                            lambda x: f" ({x:+.1f}% MoM)" if pd.notna(x) else ""
-                        )
+                        
+                        # Hole den Vormonatsnamen für den Tooltip
+                        brand_data["vormonat"] = brand_data["monat_label"].shift(1)
                         
                         fig.add_trace(go.Scatter(
                             x=brand_data["monat_start"],
@@ -856,41 +859,42 @@ with tab3:
                                           "<extra></extra>"
                         ))
                         
-                        # Füge MoM-Balken als sekundäre Darstellung hinzu
+                        # MoM-Balken mit klarer Beschriftung (Veränderung zum Vormonat)
                         if len(brand_data) > 1:
-                            # Erstelle einen separaten Trace für MoM-Änderungen
-                            mom_data = brand_data[brand_data["mom_change"].notna()]
+                            mom_data = brand_data[brand_data["mom_change"].notna()].copy()
                             if not mom_data.empty:
                                 bar_colors = ["#10B981" if x >= 0 else "#EF4444" for x in mom_data["mom_change"]]
                                 fig.add_trace(go.Bar(
                                     x=mom_data["monat_start"],
                                     y=mom_data["mom_change"],
-                                    name=f"{brand} MoM %",
+                                    name=f"{brand} Δ Vormonat",
                                     marker_color=bar_colors,
                                     opacity=0.3,
                                     yaxis="y2",
-                                    showlegend=False,
-                                    hovertemplate=f"<b>{brand} MoM</b><br>" +
+                                    showlegend=True,
+                                    text=mom_data["mom_change"].apply(lambda x: f"{x:+.1f}%"),
+                                    hovertemplate=f"<b>{brand}</b><br>" +
                                                   "%{x|%B %Y}<br>" +
-                                                  "%{y:+.1f}%<br>" +
+                                                  "Veränderung vs. Vormonat: %{text}<br>" +
                                                   "<extra></extra>"
                                 ))
                 
                 fig.update_layout(
-                    title=f"{metrik} - Monatstrend (mit MoM-Veränderung)",
+                    title=f"{metrik} - Monatstrend",
                     yaxis=dict(
                         title="Wert",
                         tickformat=",",
                         side="left"
                     ),
                     yaxis2=dict(
-                        title="MoM %",
+                        title="Δ Vormonat (%)",
                         overlaying="y",
                         side="right",
                         showgrid=False,
                         zeroline=True,
                         zerolinecolor="#999",
-                        range=[-50, 50]  # Prozent-Bereich
+                        zerolinewidth=2,
+                        range=[-50, 50]
                     ),
                     xaxis=dict(
                         tickformat="%b %Y",
@@ -910,21 +914,55 @@ with tab3:
                 )
                 st.plotly_chart(fig, use_container_width=True)
             
-            # MoM-Tabelle
-            st.markdown("### 📊 Monatsvergleich (MoM)")
+            # MoM-Tabelle (formatiert!)
+            st.markdown("### 📊 Monatsvergleich")
+            st.caption("Werte = Monatssumme | Δ = Veränderung zum Vormonat in %")
             
-            # Pivot-Tabelle erstellen
-            pivot_data = monthly_agg.pivot_table(
-                index=["monat_start", "monat_label"],
-                columns=["brand", "metrik"],
-                values="wert",
-                aggfunc="sum"
-            ).reset_index()
+            # Bessere Tabelle: Für jede Metrik/Brand eine MoM-Berechnung
+            table_data = []
             
-            if not pivot_data.empty:
-                pivot_data = pivot_data.sort_values("monat_start", ascending=False)
-                pivot_data["monat_start"] = pivot_data["monat_start"].dt.strftime("%Y-%m")
-                st.dataframe(pivot_data.head(12), use_container_width=True)
+            for _, row in monthly_agg.iterrows():
+                monat = row["monat_start"]
+                label = row["monat_label"]
+                brand = row["brand"]
+                metrik = row["metrik"]
+                wert = row["wert"]
+                
+                # Vormonat suchen
+                vormonat = monat - pd.DateOffset(months=1)
+                prev_row = monthly_agg[
+                    (monthly_agg["monat_start"] == vormonat) &
+                    (monthly_agg["brand"] == brand) &
+                    (monthly_agg["metrik"] == metrik)
+                ]
+                
+                if not prev_row.empty:
+                    prev_wert = prev_row["wert"].values[0]
+                    if prev_wert > 0:
+                        mom_pct = ((wert - prev_wert) / prev_wert) * 100
+                    else:
+                        mom_pct = None
+                else:
+                    mom_pct = None
+                
+                table_data.append({
+                    "Monat": label,
+                    "Brand": brand,
+                    "Metrik": metrik,
+                    "Wert": f"{wert:,.0f}".replace(",", "."),
+                    "Δ Vormonat": f"{mom_pct:+.1f}%" if mom_pct is not None else "—"
+                })
+            
+            df_table = pd.DataFrame(table_data)
+            
+            # Pivot für bessere Lesbarkeit
+            if not df_table.empty:
+                # Sortiere absteigend nach Datum
+                df_table["_sort"] = pd.to_datetime(df_table["Monat"], format="%b %Y")
+                df_table = df_table.sort_values(["_sort", "Brand", "Metrik"], ascending=[False, True, True])
+                df_table = df_table.drop("_sort", axis=1)
+                
+                st.dataframe(df_table.head(48), use_container_width=True, hide_index=True)
     
     else:
         # =====================================================================
