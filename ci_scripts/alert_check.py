@@ -367,13 +367,14 @@ def check_thresholds(
 # GPT ALERT INTERPRETATION
 # =============================================================================
 
-def generate_alert_analysis(alerts: List[Alert], trend_data: Dict) -> str:
+def generate_alert_analysis(alerts: List[Alert], trend_data: Dict, target_date: date) -> str:
     """
     Generiert eine GPT-basierte Analyse der Alerts mit Trendverlauf.
     
     Args:
         alerts: Liste der erkannten Alerts
         trend_data: Wochendaten für Kontext
+        target_date: Datum der Abweichung
         
     Returns:
         GPT-generierter Analyse-Text
@@ -381,9 +382,14 @@ def generate_alert_analysis(alerts: List[Alert], trend_data: Dict) -> str:
     if not OPENAI_API_KEY:
         return "⚠️ GPT-Analyse nicht verfügbar (API Key fehlt)"
     
-    # Alerts formatieren
+    weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    weekday_name = weekday_names[target_date.weekday()]
+    
+    # Alerts formatieren - MIT GENAUEN DATEN
     alert_text = "\n".join([
-        f"- {a.severity.upper()}: {a.brand} {a.metric} - {a.message}"
+        f"- {a.severity.upper()}: {a.brand} {a.metric}\n"
+        f"  📅 Abweichungsdatum: {a.date.strftime('%d.%m.%Y')} ({weekday_name})\n"
+        f"  📊 {a.message}"
         for a in alerts
     ])
     
@@ -400,22 +406,31 @@ def generate_alert_analysis(alerts: List[Alert], trend_data: Dict) -> str:
     
     prompt = f"""Du bist ein erfahrener Web-Analytics-Experte für österreichische Medienunternehmen.
 
-Es wurden kritische Alerts für die ÖWA-Metriken von VOL.AT und VIENNA.AT erkannt:
+KONTEXT:
+Berichtsdatum: {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr
+Analysiertes Datum (Abweichung): {target_date.strftime('%d.%m.%Y')} ({weekday_name})
 
-ALERTS:
+ERKANNTE ALERTS:
 {alert_text}
 
 TRENDVERLAUF DER LETZTEN 7 TAGE:
 {trend_text}
 
 Aufgaben:
-1. Analysiere die Alerts und den Trendverlauf
+1. Analysiere die Alerts und den Trendverlauf - nenne das konkrete Abweichungsdatum!
 2. Identifiziere mögliche Ursachen (Feiertage, technische Probleme, saisonale Effekte, etc.)
 3. Bewerte die Kritikalität für das Geschäft
 4. Gib eine klare Handlungsempfehlung
 
-Formatiere deine Antwort als kurzen, professionellen Alarm-Report (max. 200 Wörter).
-Verwende klare Struktur mit Überschriften.
+FORMAT (max. 200 Wörter):
+**🔍 ANALYSE**
+[Nenne das konkrete Datum der Abweichung und ordne sie ein]
+
+**📊 TREND-BEWERTUNG**
+[Basierend auf den letzten 7 Tagen]
+
+**💡 EMPFEHLUNG**
+[Konkrete Handlungsempfehlung]
 """
 
     try:
@@ -467,15 +482,23 @@ def send_alert_to_teams(alerts: List[Alert], analysis: str, target_date: date):
         icon = "🟡"
         title = "WARNING ALERT"
     
-    # Alerts gruppieren
+    # Alerts gruppieren - MIT GENAUEN DATEN
     alert_lines = []
     for a in alerts:
         sev_icon = "🚨" if a.severity == "emergency" else "🔴" if a.severity == "critical" else "🟡"
-        alert_lines.append(f"{sev_icon} **{a.brand} {a.metric}**: {a.message}")
+        alert_lines.append(
+            f"{sev_icon} **{a.brand} {a.metric}**\n"
+            f"   📅 Abweichungsdatum: **{a.date.strftime('%d.%m.%Y')}**\n"
+            f"   {a.message}"
+        )
     
-    # Facts
+    # Facts - mit klarer Unterscheidung
+    weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    weekday_name = weekday_names[target_date.weekday()]
+    
     facts = [
-        {"name": "📅 Datum", "value": target_date.strftime("%d.%m.%Y")},
+        {"name": "📅 Abweichungsdatum", "value": f"**{target_date.strftime('%d.%m.%Y')}** ({weekday_name})"},
+        {"name": "⏰ Bericht erstellt", "value": datetime.now().strftime('%d.%m.%Y %H:%M') + " Uhr"},
         {"name": "🔔 Anzahl Alerts", "value": str(len(alerts))},
         {"name": "⚠️ Höchster Level", "value": max(severities).upper()},
     ]
@@ -484,18 +507,18 @@ def send_alert_to_teams(alerts: List[Alert], analysis: str, target_date: date):
     card = {
         "@type": "MessageCard",
         "@context": "http://schema.org/extensions",
-        "summary": f"ÖWA {title}",
+        "summary": f"ÖWA {title} - Abweichungen am {target_date.strftime('%d.%m.%Y')}",
         "themeColor": color,
         "sections": [
             {
                 "activityTitle": f"{icon} ÖWA {title}",
-                "activitySubtitle": f"{len(alerts)} Anomalien erkannt",
+                "activitySubtitle": f"Anomalien am {target_date.strftime('%d.%m.%Y')} erkannt",
                 "facts": facts,
                 "markdown": True
             },
             {
-                "title": "📋 Erkannte Probleme",
-                "text": "\n".join(alert_lines),
+                "title": "📋 Erkannte Probleme (mit Datum)",
+                "text": "\n\n".join(alert_lines),
                 "markdown": True
             },
             {
@@ -503,7 +526,12 @@ def send_alert_to_teams(alerts: List[Alert], analysis: str, target_date: date):
                 "text": analysis,
                 "markdown": True
             }
-        ]
+        ],
+        "potentialAction": [{
+            "@type": "OpenUri",
+            "name": "📈 Dashboard öffnen",
+            "targets": [{"os": "default", "uri": "https://oewa-reporter-ucgucmpvryylvvkhefxyeq.streamlit.app"}]
+        }]
     }
     
     try:
@@ -604,7 +632,7 @@ def run_alert_check(target_date: date = None):
     
     # GPT-Analyse
     print("\n🤖 Generiere KI-Analyse...")
-    analysis = generate_alert_analysis(all_alerts, trend_data)
+    analysis = generate_alert_analysis(all_alerts, trend_data, target_date)
     print(f"   → {len(analysis)} Zeichen generiert")
     
     # An Teams senden

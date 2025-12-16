@@ -204,7 +204,7 @@ def save_to_airtable(records: list, existing_keys: set = None) -> dict:
     return results
 
 
-def get_historical_data(brand: str, surface: str, metric: str, weekday: int, weeks: int = 6) -> List[int]:
+def get_historical_data(brand: str, surface: str, metric: str, weekday: int, weeks: int = 6) -> List[Dict]:
     """
     Holt historische Daten für den gleichen Wochentag der letzten X Wochen.
     
@@ -216,7 +216,7 @@ def get_historical_data(brand: str, surface: str, metric: str, weekday: int, wee
         weeks: Anzahl der Wochen zurück
     
     Returns:
-        Liste der historischen Werte
+        Liste von Dicts mit {"date": date, "value": int}
     """
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
@@ -241,8 +241,8 @@ def get_historical_data(brand: str, surface: str, metric: str, weekday: int, wee
         data = response.json()
         records = data.get("records", [])
         
-        # Nur gleiche Wochentage filtern
-        matching_values = []
+        # Nur gleiche Wochentage filtern - MIT DATUM
+        matching_data = []
         for record in records:
             fields = record.get("fields", {})
             datum_str = fields.get("Datum")
@@ -252,34 +252,36 @@ def get_historical_data(brand: str, surface: str, metric: str, weekday: int, wee
                 try:
                     datum = date.fromisoformat(datum_str)
                     if datum.weekday() == weekday:
-                        matching_values.append(wert)
-                        if len(matching_values) >= weeks:
+                        matching_data.append({"date": datum, "value": wert})
+                        if len(matching_data) >= weeks:
                             break
                 except:
                     continue
         
-        return matching_values
+        return matching_data
         
     except Exception as e:
         print(f"   ⚠️ Fehler beim Laden historischer Daten: {e}")
         return []
 
 
-def check_weekday_alert(current_value: int, historical_values: List[int], threshold: float = 0.10) -> Optional[Dict]:
+def check_weekday_alert(current_value: int, current_date: date, historical_data: List[Dict], threshold: float = 0.10) -> Optional[Dict]:
     """
     Prüft ob der aktuelle Wert die Schwelle im Vergleich zum historischen Durchschnitt überschreitet.
     
     Args:
         current_value: Aktueller Tageswert
-        historical_values: Werte der letzten 6 gleichen Wochentage
+        current_date: Datum des aktuellen Wertes
+        historical_data: Liste von {"date": date, "value": int} der letzten 6 gleichen Wochentage
         threshold: Schwellenwert (0.10 = ±10%)
     
     Returns:
         Alert-Dict wenn Schwelle überschritten, sonst None
     """
-    if len(historical_values) < 3:
+    if len(historical_data) < 3:
         return None  # Nicht genug historische Daten
     
+    historical_values = [d["value"] for d in historical_data]
     avg = statistics.mean(historical_values)
     if avg == 0:
         return None
@@ -289,10 +291,11 @@ def check_weekday_alert(current_value: int, historical_values: List[int], thresh
     if abs(pct_change) >= threshold:
         return {
             "current_value": current_value,
+            "current_date": current_date,
             "historical_avg": avg,
             "pct_change": pct_change,
             "direction": "up" if pct_change > 0 else "down",
-            "historical_values": historical_values
+            "historical_data": historical_data  # Jetzt mit Datum!
         }
     
     return None
@@ -306,21 +309,31 @@ def generate_alert_gpt_analysis(alerts: List[Dict], target_date: date) -> str:
     weekday_names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     weekday_name = weekday_names[target_date.weekday()]
     
-    # Alerts formatieren
+    # Alerts formatieren - MIT GENAUEN DATEN
     alert_details = []
     for a in alerts:
         direction_icon = "📈" if a["direction"] == "up" else "📉"
         direction_text = "über" if a["direction"] == "up" else "unter"
+        
+        # Historische Daten mit Datum formatieren
+        historical_with_dates = []
+        for h in a.get("historical_data", [])[:6]:
+            hist_date = h["date"].strftime("%d.%m.")
+            hist_value = f"{h['value']:,}"
+            historical_with_dates.append(f"{hist_date}: {hist_value}")
+        
         alert_details.append(
-            f"- {direction_icon} **{a['brand']} {a['surface']} {a['metric']}**: "
-            f"{a['current_value']:,} ({a['pct_change']*100:+.1f}% {direction_text} Durchschnitt)\n"
-            f"  Historische Werte ({weekday_name}): {', '.join(f'{v:,}' for v in a['historical_values'][:6])}"
+            f"- {direction_icon} **{a['brand']} {a['surface']} {a['metric']}**\n"
+            f"  📅 Abweichungsdatum: **{a['current_date'].strftime('%d.%m.%Y')}** ({weekday_name})\n"
+            f"  📊 Aktueller Wert: **{a['current_value']:,}** ({a['pct_change']*100:+.1f}% {direction_text} Durchschnitt)\n"
+            f"  📈 Historische Vergleichswerte:\n     " + " | ".join(historical_with_dates)
         )
     
     prompt = f"""Du bist ein erfahrener Web-Analytics-Experte für österreichische Medienunternehmen.
 
 KONTEXT:
-Datum: {target_date.strftime('%d.%m.%Y')} ({weekday_name})
+Berichtsdatum: {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr
+Analysiertes Datum: {target_date.strftime('%d.%m.%Y')} ({weekday_name})
 Es wurden signifikante Abweichungen (±10%) im Vergleich zu den letzten 6 gleichen Wochentagen erkannt.
 
 ERKANNTE ABWEICHUNGEN:
@@ -328,16 +341,16 @@ ERKANNTE ABWEICHUNGEN:
 
 DEINE AUFGABE:
 1. Analysiere die Abweichungen im Kontext (Saisonalität, Feiertage, Wochenende-Effekte)
-2. Bewerte ob der Trend (↑/↓) sich fortsetzt oder mildert
+2. Bewerte ob der Trend (↑/↓) sich fortsetzt oder mildert basierend auf den historischen Daten
 3. Identifiziere mögliche Ursachen
 4. Gib eine kurze Handlungsempfehlung
 
 FORMAT (max. 150 Wörter):
 **🔍 ANALYSE**
-[2-3 Sätze zur Einordnung der Abweichung]
+[2-3 Sätze zur Einordnung der Abweichung - nenne das konkrete Datum!]
 
 **📊 TREND-BEWERTUNG**
-[1-2 Sätze zum Trend: Fortsetzung/Milderung/Stabilisierung]
+[1-2 Sätze zum Trend basierend auf den historischen Daten]
 
 **💡 EMPFEHLUNG**
 [1 Satz Handlungsempfehlung]
@@ -380,18 +393,27 @@ def send_alert_notification(alerts: List[Dict], analysis: str, target_date: date
     has_critical = any(abs(a["pct_change"]) >= 0.20 for a in alerts)
     color = "DC3545" if has_critical else "FFC107"  # Rot oder Gelb
     
-    # Alert-Details formatieren
+    # Alert-Details formatieren - MIT GENAUEN DATEN
     alert_lines = []
     for a in alerts:
         icon = "📈" if a["direction"] == "up" else "📉"
+        
+        # Historische Daten mit Datum formatieren
+        hist_dates = []
+        for h in a.get("historical_data", [])[:6]:
+            hist_dates.append(f"{h['date'].strftime('%d.%m.')}: {h['value']:,}")
+        hist_str = " | ".join(hist_dates) if hist_dates else "N/A"
+        
         alert_lines.append(
-            f"{icon} **{a['brand']} {a['surface']} - {a['metric']}**: "
-            f"{a['current_value']:,} ({a['pct_change']*100:+.1f}%)"
+            f"{icon} **{a['brand']} {a['surface']} - {a['metric']}**\n"
+            f"   📅 **{a['current_date'].strftime('%d.%m.%Y')}**: {a['current_value']:,} ({a['pct_change']*100:+.1f}%)\n"
+            f"   📊 Vergleich: {hist_str}"
         )
     
-    # Facts
+    # Facts mit genauem Abweichungsdatum
     facts = [
-        {"name": "📅 Datum", "value": f"{target_date.strftime('%d.%m.%Y')} ({weekday_name})"},
+        {"name": "📅 Abweichungsdatum", "value": f"**{target_date.strftime('%d.%m.%Y')}** ({weekday_name})"},
+        {"name": "⏰ Bericht erstellt", "value": datetime.now().strftime('%d.%m.%Y %H:%M') + " Uhr"},
         {"name": "🔔 Anzahl Abweichungen", "value": str(len(alerts))},
         {"name": "📊 Vergleichsbasis", "value": f"Letzte 6 {weekday_name}e"},
     ]
@@ -399,18 +421,18 @@ def send_alert_notification(alerts: List[Dict], analysis: str, target_date: date
     card = {
         "@type": "MessageCard",
         "@context": "http://schema.org/extensions",
-        "summary": f"ÖWA Alert - {len(alerts)} Abweichungen erkannt",
+        "summary": f"ÖWA Alert - Abweichungen am {target_date.strftime('%d.%m.%Y')}",
         "themeColor": color,
         "sections": [
             {
                 "activityTitle": f"⚠️ ÖWA WOCHENTAGS-ALERT",
-                "activitySubtitle": f"Abweichungen über ±10% Schwelle erkannt",
+                "activitySubtitle": f"Abweichungen über ±10% Schwelle am {target_date.strftime('%d.%m.%Y')} erkannt",
                 "facts": facts,
                 "markdown": True
             },
             {
-                "title": "📋 Erkannte Abweichungen",
-                "text": "\n".join(alert_lines),
+                "title": "📋 Erkannte Abweichungen (mit Vergleichsdaten)",
+                "text": "\n\n".join(alert_lines),
                 "markdown": True
             },
             {
@@ -617,7 +639,7 @@ def main():
     all_alerts = []
     
     for data_point in ingested_data:
-        # Historische Daten für gleichen Wochentag laden
+        # Historische Daten für gleichen Wochentag laden (jetzt mit Datum!)
         historical = get_historical_data(
             brand=data_point["brand"],
             surface=data_point["surface"],
@@ -629,7 +651,8 @@ def main():
         if len(historical) >= 3:
             alert = check_weekday_alert(
                 current_value=data_point["value"],
-                historical_values=historical,
+                current_date=target_date,
+                historical_data=historical,
                 threshold=ALERT_THRESHOLD_PCT
             )
             
