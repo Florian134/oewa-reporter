@@ -67,7 +67,7 @@ METRICS_MAP = {
 VALUE_FIELDS = {
     "pageimpressions": "pis",
     "visits": "visits",
-    "uniqueclients": "unique_clients"
+    "uniqueclients": "uclients"  # KORRIGIERT: war "unique_clients", richtig ist "uclients"
 }
 
 
