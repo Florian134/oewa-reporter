@@ -54,6 +54,8 @@ daily_ingest:
       when: never
     - if: $CI_COMMIT_REF_NAME == "backfill-90days"
       when: never
+    - if: $CI_COMMIT_REF_NAME == "unified-backfill"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -150,7 +152,7 @@ alert_check:
 
 # =============================================================================
 # UNIFIED BACKFILL v3.0 - Ganzheitlicher Backfill mit korrekter UC-Behandlung
-# Triggern mit: JOB_TYPE=unified_backfill
+# Triggern mit: JOB_TYPE=unified_backfill ODER Branch "unified-backfill"
 # Optional: BACKFILL_DAYS=90 (default: 90)
 # =============================================================================
 unified_backfill:
@@ -165,6 +167,7 @@ unified_backfill:
     - echo "✅ Unified Backfill completed!"
   rules:
     - if: $JOB_TYPE == "unified_backfill"
+    - if: $CI_COMMIT_REF_NAME == "unified-backfill"
 
 # =============================================================================
 # NOTIFICATION TEST - Testet alle Teams + GPT Funktionen
