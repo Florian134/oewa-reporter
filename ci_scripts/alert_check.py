@@ -161,6 +161,9 @@ def parse_measurements(records: List[Dict]) -> Dict[str, Dict[str, Dict[date, in
     """
     Parst Airtable Records in strukturierte Daten.
     
+    HINWEIS: Unique Clients sind vom Alerting ausgeschlossen, da sie 2 Tage
+    verzögert in der INFOnline API verfügbar sind.
+    
     Returns:
         {brand: {metric: {date: value}}}
     """
@@ -168,6 +171,7 @@ def parse_measurements(records: List[Dict]) -> Dict[str, Dict[str, Dict[date, in
         "VOL": {"Page Impressions": {}, "Visits": {}},
         "Vienna": {"Page Impressions": {}, "Visits": {}}
     }
+    # KEIN Unique Clients - diese sind 2 Tage verzögert und würden falsche Alerts auslösen
     
     for record in records:
         fields = record.get("fields", {})

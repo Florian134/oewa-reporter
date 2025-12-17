@@ -56,7 +56,11 @@ HOMEPAGE_SITES = [
 ]
 
 # Standard-Metriken für alle Sites
-METRICS = ["pageimpressions", "visits", "uniqueclients"]
+# HINWEIS: Unique Clients sind erst nach ~2 Tagen in der API verfügbar!
+METRICS_STANDARD = ["pageimpressions", "visits"]  # Für gestern verfügbar
+METRICS_DELAYED = ["uniqueclients"]  # Brauchen 2-3 Tage Verzögerung
+UC_DELAY_DAYS = 3  # Unique Clients werden 3 Tage verzögert importiert
+
 METRICS_MAP = {
     "pageimpressions": "Page Impressions",
     "visits": "Visits",
@@ -500,26 +504,29 @@ def main():
         print("❌ AIRTABLE_API_KEY nicht gesetzt!")
         return
     
-    # Gestern als Zieldatum
+    # Zieldaten: Gestern für Standard-Metriken, vor 3 Tagen für UC
     target_date = date.today() - timedelta(days=1)
-    print(f"\n📅 Datum: {target_date.isoformat()}")
-    print(f"📅 Wochentag: {['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'][target_date.weekday()]}")
+    uc_target_date = date.today() - timedelta(days=UC_DELAY_DAYS)
+    
+    print(f"\n📅 Standard-Metriken Datum: {target_date.isoformat()} (gestern)")
+    print(f"📅 Unique Clients Datum: {uc_target_date.isoformat()} (vor {UC_DELAY_DAYS} Tagen)")
+    print(f"   ℹ️ Unique Clients sind in der API erst nach ~2 Tagen verfügbar")
     print()
     
     records_to_create = []
     errors = []
-    ingested_data = []  # Für Alerting
+    ingested_data = []  # Für Alerting (nur Standard-Metriken)
     
     # ==========================================================================
-    # PHASE 1: Standard-Metriken für alle Sites (Web + App)
+    # PHASE 1a: Standard-Metriken (PI, Visits) für GESTERN
     # ==========================================================================
     print("=" * 70)
-    print("📊 PHASE 1: Standard-Metriken (PI, Visits, UC)")
+    print(f"📊 PHASE 1a: Standard-Metriken (PI, Visits) - {target_date.isoformat()}")
     print("=" * 70)
     
     for site in SITES:
         print(f"\n📊 {site['name']}...")
-        for metric_key in METRICS:
+        for metric_key in METRICS_STANDARD:
             result = fetch_infonline_data(site["site_id"], metric_key, target_date)
             
             if result["success"]:
@@ -543,15 +550,60 @@ def main():
                         }
                     })
                     
-                    # Für Alerting speichern
+                    # Für Alerting speichern (nur Standard-Metriken)
                     ingested_data.append({
                         "brand": site["brand"],
                         "surface": site["surface"],
                         "metric": metric_name,
-                        "value": value
+                        "value": value,
+                        "date": target_date
                     })
                     
                     print(f"   ✅ {metric_name}: {value:,}")
+                else:
+                    errors.append(f"{site['name']}/{metric_key}: Kein Wert")
+                    print(f"   ⚠️ {metric_key}: Kein Wert")
+            else:
+                errors.append(f"{site['name']}/{metric_key}: {result['error']}")
+                print(f"   ❌ {metric_key}: {result['error']}")
+    
+    # ==========================================================================
+    # PHASE 1b: Unique Clients für VOR 3 TAGEN (verzögerte Verfügbarkeit)
+    # ==========================================================================
+    print("\n" + "=" * 70)
+    print(f"👤 PHASE 1b: Unique Clients - {uc_target_date.isoformat()} (verzögert)")
+    print("=" * 70)
+    
+    for site in SITES:
+        print(f"\n👤 {site['name']}...")
+        for metric_key in METRICS_DELAYED:
+            result = fetch_infonline_data(site["site_id"], metric_key, uc_target_date)
+            
+            if result["success"]:
+                value, preliminary = extract_value(result["data"], metric_key)
+                
+                # WICHTIG: UC-Wert von 0 bedeutet "noch nicht verfügbar" - nicht importieren!
+                if value is not None and value > 0:
+                    metric_name = METRICS_MAP.get(metric_key, metric_key)
+                    unique_key = f"{uc_target_date.isoformat()}_{site['brand']}_{site['surface']}_{metric_name}"
+                    
+                    records_to_create.append({
+                        "fields": {
+                            "Datum": uc_target_date.isoformat(),
+                            "Brand": site["brand"],
+                            "Plattform": site["surface"],
+                            "Metrik": metric_name,
+                            "Wert": value,
+                            "Site ID": site["site_id"],
+                            "Vorläufig": preliminary,
+                            "Erfasst am": datetime.utcnow().isoformat(),
+                            "Unique Key": unique_key
+                        }
+                    })
+                    
+                    print(f"   ✅ {metric_name}: {value:,}")
+                elif value == 0:
+                    print(f"   ⚠️ {metric_key}: 0 (noch nicht finalisiert - übersprungen)")
                 else:
                     errors.append(f"{site['name']}/{metric_key}: Kein Wert")
                     print(f"   ⚠️ {metric_key}: Kein Wert")
@@ -629,16 +681,24 @@ def main():
                 errors.append(err)
     
     # ==========================================================================
-    # PHASE 4: Wochentags-Alerting
+    # PHASE 4: Wochentags-Alerting (nur für Standard-Metriken, nicht UC)
     # ==========================================================================
     print("\n" + "=" * 70)
     print("🔔 PHASE 4: Wochentags-Alerting (±10% Schwelle)")
+    print("   ℹ️ Unique Clients sind vom Alerting ausgeschlossen (2 Tage verzögert)")
     print("=" * 70)
     
-    weekday = target_date.weekday()
     all_alerts = []
     
     for data_point in ingested_data:
+        # Nur Standard-Metriken alerten (nicht Unique Clients)
+        if data_point["metric"] == "Unique Clients":
+            print(f"   ⏭️ {data_point['brand']} {data_point['surface']} {data_point['metric']}: Übersprungen (verzögert)")
+            continue
+        
+        alert_date = data_point.get("date", target_date)
+        weekday = alert_date.weekday()
+        
         # Historische Daten für gleichen Wochentag laden (jetzt mit Datum!)
         historical = get_historical_data(
             brand=data_point["brand"],
@@ -651,7 +711,7 @@ def main():
         if len(historical) >= 3:
             alert = check_weekday_alert(
                 current_value=data_point["value"],
-                current_date=target_date,
+                current_date=alert_date,
                 historical_data=historical,
                 threshold=ALERT_THRESHOLD_PCT
             )
