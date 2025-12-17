@@ -38,6 +38,8 @@ daily_ingest:
   rules:
     - if: $JOB_TYPE == "backfill"
       when: never
+    - if: $JOB_TYPE == "unified_backfill"
+      when: never
     - if: $JOB_TYPE == "weekly"
       when: never
     - if: $JOB_TYPE == "monthly"
@@ -145,6 +147,24 @@ alert_check:
     - echo "✅ Alert Check completed!"
   rules:
     - if: $JOB_TYPE == "alert_check"
+
+# =============================================================================
+# UNIFIED BACKFILL v3.0 - Ganzheitlicher Backfill mit korrekter UC-Behandlung
+# Triggern mit: JOB_TYPE=unified_backfill
+# Optional: BACKFILL_DAYS=90 (default: 90)
+# =============================================================================
+unified_backfill:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "🔄 ÖWA Reporter - Unified Backfill v3.0"
+    - echo "   Ganzheitlicher Import mit korrekter UC-Behandlung"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - python ci_scripts/unified_backfill.py --days ${BACKFILL_DAYS:-90}
+    - echo "✅ Unified Backfill completed!"
+  rules:
+    - if: $JOB_TYPE == "unified_backfill"
 
 # =============================================================================
 # NOTIFICATION TEST - Testet alle Teams + GPT Funktionen
