@@ -163,7 +163,7 @@ unified_backfill:
     - echo "   Ganzheitlicher Import mit korrekter UC-Behandlung"
     - pip install --upgrade pip
     - pip install requests python-dotenv
-    - python ci_scripts/unified_backfill.py --days ${BACKFILL_DAYS:-90}
+    - python ci_scripts/unified_backfill.py --days ${BACKFILL_DAYS:-400}
     - echo "✅ Unified Backfill completed!"
   rules:
     - if: $JOB_TYPE == "unified_backfill"
