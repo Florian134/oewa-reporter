@@ -56,6 +56,8 @@ daily_ingest:
       when: never
     - if: $CI_COMMIT_REF_NAME == "unified-backfill"
       when: never
+    - if: $CI_COMMIT_REF_NAME == "monthly-backfill"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "trigger"
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -149,6 +151,25 @@ alert_check:
     - echo "✅ Alert Check completed!"
   rules:
     - if: $JOB_TYPE == "alert_check"
+
+# =============================================================================
+# MONTHLY BACKFILL v1.0 - Historische Monatsdaten (unbegrenzt)
+# Triggern mit: JOB_TYPE=monthly_backfill ODER Branch "monthly-backfill"
+# Optional: START_MONTH=2024-01 (default: 2024-01)
+# =============================================================================
+monthly_backfill:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "📅 ÖWA Reporter - Monthly Backfill v1.0"
+    - echo "   Historische Monatsdaten (unbegrenzt verfügbar)"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - python ci_scripts/monthly_backfill.py --start ${START_MONTH:-2024-01}
+    - echo "✅ Monthly Backfill completed!"
+  rules:
+    - if: $JOB_TYPE == "monthly_backfill"
+    - if: $CI_COMMIT_REF_NAME == "monthly-backfill"
 
 # =============================================================================
 # UNIFIED BACKFILL v3.0 - Ganzheitlicher Backfill mit korrekter UC-Behandlung
