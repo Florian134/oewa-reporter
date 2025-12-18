@@ -250,10 +250,18 @@ def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
     
     IMGUR_CLIENT_ID muss in GitLab CI/CD Variables konfiguriert sein.
     """
-    if not image_bytes or not IMGUR_CLIENT_ID:
-        if not IMGUR_CLIENT_ID:
-            print("   ⚠️ IMGUR_CLIENT_ID nicht konfiguriert - Chart-Upload übersprungen")
+    if not image_bytes:
+        print("   ⚠️ Keine Bild-Daten zum Hochladen")
         return None
+    
+    if not IMGUR_CLIENT_ID:
+        print("   ❌ IMGUR_CLIENT_ID nicht konfiguriert!")
+        print("   💡 Bitte IMGUR_CLIENT_ID in GitLab CI/CD Variables hinzufügen:")
+        print("      Settings > CI/CD > Variables > Add Variable")
+        print("      Key: IMGUR_CLIENT_ID, Value: <Ihre Imgur Client ID>")
+        return None
+    
+    print(f"   📤 Lade Bild zu Imgur hoch ({len(image_bytes)} bytes)...")
     
     try:
         headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
@@ -263,18 +271,28 @@ def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
             "https://api.imgur.com/3/image",
             headers=headers,
             data=data,
-            timeout=30
+            timeout=60  # Erhöht für große Bilder
         )
         
         if response.status_code == 200:
-            url = response.json()["data"]["link"]
-            print(f"   → Hochgeladen: {url}")
+            result = response.json()
+            url = result["data"]["link"]
+            print(f"   ✅ Hochgeladen: {url}")
             return url
         else:
-            print(f"   ⚠️ Imgur Upload fehlgeschlagen: {response.status_code}")
+            print(f"   ❌ Imgur Upload fehlgeschlagen: HTTP {response.status_code}")
+            try:
+                error_data = response.json()
+                if "data" in error_data and "error" in error_data["data"]:
+                    print(f"   📋 Fehler: {error_data['data']['error']}")
+            except:
+                print(f"   📋 Response: {response.text[:200]}")
             return None
+    except requests.exceptions.Timeout:
+        print("   ⚠️ Imgur Upload Timeout (60s) - Bild zu groß?")
+        return None
     except Exception as e:
-        print(f"   ⚠️ Imgur Upload Fehler: {e}")
+        print(f"   ⚠️ Imgur Upload Fehler: {type(e).__name__}: {e}")
         return None
 
 
@@ -657,6 +675,23 @@ def run_weekly_report():
     print("   NUR VOL.AT (Web + App)")
     print(f"   Vergleich: Aktuelle Woche vs. {COMPARISON_WEEKS}-Wochen-Durchschnitt")
     print("=" * 70)
+    
+    # Konfigurationsstatus ausgeben
+    print("\n🔧 KONFIGURATION:")
+    print(f"   AIRTABLE_API_KEY: {'✅ Konfiguriert' if AIRTABLE_API_KEY else '❌ FEHLT!'}")
+    print(f"   TEAMS_WEBHOOK_URL: {'✅ Konfiguriert' if TEAMS_WEBHOOK_URL else '❌ FEHLT!'}")
+    print(f"   OPENAI_API_KEY: {'✅ Konfiguriert' if OPENAI_API_KEY else '⚠️ Optional'}")
+    print(f"   IMGUR_CLIENT_ID: {'✅ Konfiguriert' if IMGUR_CLIENT_ID else '❌ FEHLT - Keine Charts!'}")
+    print(f"   PLOTLY_AVAILABLE: {'✅ Ja' if PLOTLY_AVAILABLE else '❌ Nein'}")
+    
+    if not IMGUR_CLIENT_ID:
+        print("\n" + "⚠️" * 20)
+        print("   WICHTIG: IMGUR_CLIENT_ID fehlt!")
+        print("   Charts können nicht zu Imgur hochgeladen werden.")
+        print("   Lösung: GitLab CI/CD > Settings > CI/CD > Variables")
+        print("           Variable hinzufügen: IMGUR_CLIENT_ID = <Ihre Client ID>")
+        print("           Imgur App registrieren: https://api.imgur.com/oauth2/addclient")
+        print("⚠️" * 20 + "\n")
     
     if not AIRTABLE_API_KEY:
         print("❌ AIRTABLE_API_KEY nicht gesetzt!")
