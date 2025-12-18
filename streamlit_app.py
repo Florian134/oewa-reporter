@@ -103,7 +103,16 @@ AIRTABLE_BASE_ID = st.secrets.get("AIRTABLE_BASE_ID", os.getenv("AIRTABLE_BASE_I
 # =============================================================================
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_data_from_airtable():
-    """Lädt Daten direkt aus Airtable"""
+    """
+    Lädt Daten direkt aus Airtable.
+    
+    WICHTIG: Unterscheidet zwischen täglichen und monatlichen Daten anhand des Unique Key.
+    - Tägliche Daten: Unique Key ohne "_MONTH_"
+    - Monatliche Daten: Unique Key enthält "_MONTH_"
+    
+    Returns:
+        DataFrame mit zusätzlicher Spalte 'is_monthly' zur Unterscheidung
+    """
     if not AIRTABLE_API_KEY:
         st.error("⚠️ AIRTABLE_API_KEY nicht konfiguriert! Bitte in Streamlit Secrets eintragen.")
         return pd.DataFrame()
@@ -131,6 +140,10 @@ def load_data_from_airtable():
                 
                 for record in records:
                     fields = record.get("fields", {})
+                    unique_key = fields.get("Unique Key", "")
+                    # Unterscheide monatliche von täglichen Daten
+                    is_monthly = "_MONTH_" in unique_key if unique_key else False
+                    
                     all_records.append({
                         "datum": fields.get("Datum"),
                         "brand": fields.get("Brand"),
@@ -139,6 +152,8 @@ def load_data_from_airtable():
                         "wert": fields.get("Wert"),
                         "site_id": fields.get("Site ID"),
                         "vorlaeufig": fields.get("Vorläufig", False),
+                        "unique_key": unique_key,
+                        "is_monthly": is_monthly,  # NEU: Markierung für Monatsdaten
                     })
                 
                 offset = data.get("offset")
@@ -206,9 +221,18 @@ st.markdown("""
 # =============================================================================
 # LOAD DATA FIRST (to determine available date range)
 # =============================================================================
-df = load_data_from_airtable()
+df_all = load_data_from_airtable()
 
-# Determine available data range
+# Trenne tägliche von monatlichen Daten
+# WICHTIG: Verhindert Vermischung von Monatsaggregaten mit Tagesdaten!
+if not df_all.empty:
+    df = df_all[df_all["is_monthly"] == False].copy()  # Nur Tagesdaten für normale Ansicht
+    df_monthly_raw = df_all[df_all["is_monthly"] == True].copy()  # Monatsdaten separat
+else:
+    df = pd.DataFrame()
+    df_monthly_raw = pd.DataFrame()
+
+# Determine available data range (nur aus Tagesdaten)
 if not df.empty:
     data_min_date = df["datum"].min().date()
     data_max_date = df["datum"].max().date()
