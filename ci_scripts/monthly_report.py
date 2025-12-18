@@ -43,7 +43,7 @@ AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID", "")
+IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "")
 
 # Chart-Größe
 CHART_WIDTH = 1600
@@ -246,26 +246,39 @@ def create_daily_trend_chart(data: Dict, metric: str = "Page Impressions") -> Op
     return fig.to_image(format="png", scale=CHART_SCALE)
 
 
-def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
-    """Lädt ein Bild zu Imgur hoch."""
-    if not image_bytes or not IMGUR_CLIENT_ID:
+def upload_to_imgbb(image_bytes: bytes) -> Optional[str]:
+    """
+    Lädt ein Bild zu imgBB hoch.
+    
+    Vorteile von imgBB:
+    - Kostenlos (32MB pro Bild)
+    - Permanente Speicherung (keine Löschung)
+    - Einfache API
+    """
+    if not image_bytes or not IMGBB_API_KEY:
+        if not IMGBB_API_KEY:
+            print("   ⚠️ IMGBB_API_KEY nicht konfiguriert")
         return None
     
     try:
-        headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-        data = {"image": base64.b64encode(image_bytes).decode("utf-8")}
-        
         response = requests.post(
-            "https://api.imgur.com/3/image",
-            headers=headers,
-            data=data,
-            timeout=30
+            "https://api.imgbb.com/1/upload",
+            data={
+                "key": IMGBB_API_KEY,
+                "image": base64.b64encode(image_bytes).decode("utf-8")
+            },
+            timeout=60
         )
         
         if response.status_code == 200:
-            return response.json()["data"]["link"]
-        return None
-    except:
+            url = response.json()["data"]["url"]
+            print(f"   ✅ imgBB Upload: {url}")
+            return url
+        else:
+            print(f"   ⚠️ imgBB Upload fehlgeschlagen: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"   ⚠️ imgBB Fehler: {e}")
         return None
 
 
@@ -695,7 +708,7 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
             # MoM Vergleich (Web + App)
             chart_bytes = create_monthly_comparison_chart(data, "Page Impressions")
             if chart_bytes:
-                url = upload_to_imgur(chart_bytes)
+                url = upload_to_imgbb(chart_bytes)
                 if url:
                     image_urls["VOL MoM Vergleich PI"] = url
                     print(f"   → MoM-Vergleich (PI) hochgeladen")
@@ -703,7 +716,7 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
             # MoM Vergleich Visits
             visits_chart = create_monthly_comparison_chart(data, "Visits")
             if visits_chart:
-                url = upload_to_imgur(visits_chart)
+                url = upload_to_imgbb(visits_chart)
                 if url:
                     image_urls["VOL MoM Vergleich Visits"] = url
                     print(f"   → MoM-Vergleich (Visits) hochgeladen")
@@ -711,7 +724,7 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
             # Web vs. App Pie Chart
             pie_chart = create_web_vs_app_chart(data, "Page Impressions")
             if pie_chart:
-                url = upload_to_imgur(pie_chart)
+                url = upload_to_imgbb(pie_chart)
                 if url:
                     image_urls["VOL Web vs. App Anteil"] = url
                     print(f"   → Web/App-Anteil hochgeladen")
@@ -719,7 +732,7 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
             # Monatstrend (Web vs. App Linien)
             trend_bytes = create_daily_trend_chart(data, "Page Impressions")
             if trend_bytes:
-                url = upload_to_imgur(trend_bytes)
+                url = upload_to_imgbb(trend_bytes)
                 if url:
                     image_urls["VOL Monatstrend PI (Web vs. App)"] = url
                     print(f"   → Monatstrend hochgeladen")

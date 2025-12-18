@@ -40,7 +40,7 @@ AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-IMGUR_CLIENT_ID = os.environ.get("IMGUR_CLIENT_ID", "")
+IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "")
 
 # Chart-Größe (ERHÖHT für bessere Lesbarkeit in Teams)
 CHART_WIDTH = 1600
@@ -244,55 +244,60 @@ def create_6week_comparison_chart(weekly_data: Dict, metric: str = "Page Impress
     return fig.to_image(format="png", scale=CHART_SCALE)
 
 
-def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
+def upload_to_imgbb(image_bytes: bytes) -> Optional[str]:
     """
-    Lädt ein Bild zu Imgur hoch.
+    Lädt ein Bild zu imgBB hoch.
     
-    IMGUR_CLIENT_ID muss in GitLab CI/CD Variables konfiguriert sein.
+    IMGBB_API_KEY muss in GitLab CI/CD Variables konfiguriert sein.
+    
+    Vorteile von imgBB:
+    - Kostenlos (32MB pro Bild)
+    - Permanente Speicherung (keine Löschung)
+    - Einfache API (nur ein POST-Request)
+    - Keine OAuth-Authentifizierung nötig
     """
     if not image_bytes:
         print("   ⚠️ Keine Bild-Daten zum Hochladen")
         return None
     
-    if not IMGUR_CLIENT_ID:
-        print("   ❌ IMGUR_CLIENT_ID nicht konfiguriert!")
-        print("   💡 Bitte IMGUR_CLIENT_ID in GitLab CI/CD Variables hinzufügen:")
+    if not IMGBB_API_KEY:
+        print("   ❌ IMGBB_API_KEY nicht konfiguriert!")
+        print("   💡 Bitte IMGBB_API_KEY in GitLab CI/CD Variables hinzufügen:")
         print("      Settings > CI/CD > Variables > Add Variable")
-        print("      Key: IMGUR_CLIENT_ID, Value: <Ihre Imgur Client ID>")
+        print("      Key: IMGBB_API_KEY, Value: <Ihr imgBB API Key>")
         return None
     
-    print(f"   📤 Lade Bild zu Imgur hoch ({len(image_bytes)} bytes)...")
+    print(f"   📤 Lade Bild zu imgBB hoch ({len(image_bytes)} bytes)...")
     
     try:
-        headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-        data = {"image": base64.b64encode(image_bytes).decode("utf-8")}
-        
         response = requests.post(
-            "https://api.imgur.com/3/image",
-            headers=headers,
-            data=data,
+            "https://api.imgbb.com/1/upload",
+            data={
+                "key": IMGBB_API_KEY,
+                "image": base64.b64encode(image_bytes).decode("utf-8")
+            },
             timeout=60  # Erhöht für große Bilder
         )
         
         if response.status_code == 200:
             result = response.json()
-            url = result["data"]["link"]
+            url = result["data"]["url"]
             print(f"   ✅ Hochgeladen: {url}")
             return url
         else:
-            print(f"   ❌ Imgur Upload fehlgeschlagen: HTTP {response.status_code}")
+            print(f"   ❌ imgBB Upload fehlgeschlagen: HTTP {response.status_code}")
             try:
                 error_data = response.json()
-                if "data" in error_data and "error" in error_data["data"]:
-                    print(f"   📋 Fehler: {error_data['data']['error']}")
+                if "error" in error_data:
+                    print(f"   📋 Fehler: {error_data['error']}")
             except:
                 print(f"   📋 Response: {response.text[:200]}")
             return None
     except requests.exceptions.Timeout:
-        print("   ⚠️ Imgur Upload Timeout (60s) - Bild zu groß?")
+        print("   ⚠️ imgBB Upload Timeout (60s) - Bild zu groß?")
         return None
     except Exception as e:
-        print(f"   ⚠️ Imgur Upload Fehler: {type(e).__name__}: {e}")
+        print(f"   ⚠️ imgBB Upload Fehler: {type(e).__name__}: {e}")
         return None
 
 
@@ -698,15 +703,15 @@ def run_weekly_report():
     print(f"   AIRTABLE_API_KEY: {'✅ Konfiguriert' if AIRTABLE_API_KEY else '❌ FEHLT!'}")
     print(f"   TEAMS_WEBHOOK_URL: {'✅ Konfiguriert' if TEAMS_WEBHOOK_URL else '❌ FEHLT!'}")
     print(f"   OPENAI_API_KEY: {'✅ Konfiguriert' if OPENAI_API_KEY else '⚠️ Optional'}")
-    print(f"   IMGUR_CLIENT_ID: {'✅ Konfiguriert' if IMGUR_CLIENT_ID else '❌ FEHLT - Keine Charts!'}")
+    print(f"   IMGBB_API_KEY: {'✅ Konfiguriert' if IMGBB_API_KEY else '❌ FEHLT - Keine Charts!'}")
     print(f"   PLOTLY_AVAILABLE: {'✅ Ja' if PLOTLY_AVAILABLE else '❌ Nein'}")
     
-    if not IMGUR_CLIENT_ID:
+    if not IMGBB_API_KEY:
         print("\n" + "⚠️" * 20)
-        print("   WICHTIG: IMGUR_CLIENT_ID fehlt!")
+        print("   WICHTIG: IMGBB_API_KEY fehlt!")
         print("   Charts können nicht zu Imgur hochgeladen werden.")
         print("   Lösung: GitLab CI/CD > Settings > CI/CD > Variables")
-        print("           Variable hinzufügen: IMGUR_CLIENT_ID = <Ihre Client ID>")
+        print("           Variable hinzufügen: IMGBB_API_KEY = <Ihre Client ID>")
         print("           Imgur App registrieren: https://api.imgur.com/oauth2/addclient")
         print("⚠️" * 20 + "\n")
     
@@ -758,7 +763,7 @@ def run_weekly_report():
             chart_bytes = create_kpi_comparison_chart(data, "Page Impressions")
             if chart_bytes:
                 print("   → PI-Vergleich (vs. 6-Wochen-Ø) erstellt")
-                url = upload_to_imgur(chart_bytes)
+                url = upload_to_imgbb(chart_bytes)
                 if url:
                     image_urls["VOL Page Impressions vs. 6-Wochen-Ø"] = url
             
@@ -766,7 +771,7 @@ def run_weekly_report():
             visits_chart = create_kpi_comparison_chart(data, "Visits")
             if visits_chart:
                 print("   → Visits-Vergleich erstellt")
-                url = upload_to_imgur(visits_chart)
+                url = upload_to_imgbb(visits_chart)
                 if url:
                     image_urls["VOL Visits vs. 6-Wochen-Ø"] = url
             
@@ -774,7 +779,7 @@ def run_weekly_report():
             trend_bytes = create_trend_chart(data, "Page Impressions")
             if trend_bytes:
                 print("   → 7-Tage-Trend erstellt")
-                url = upload_to_imgur(trend_bytes)
+                url = upload_to_imgbb(trend_bytes)
                 if url:
                     image_urls["VOL 7-Tage-Trend PI"] = url
             
@@ -782,7 +787,7 @@ def run_weekly_report():
             week_chart = create_6week_comparison_chart(data, "Page Impressions")
             if week_chart:
                 print("   → 7-Wochen-Übersicht erstellt")
-                url = upload_to_imgur(week_chart)
+                url = upload_to_imgbb(week_chart)
                 if url:
                     image_urls["VOL 7-Wochen-Übersicht PI"] = url
                     
