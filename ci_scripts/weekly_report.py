@@ -46,6 +46,9 @@ CHART_WIDTH = 1600
 CHART_HEIGHT = 800
 CHART_SCALE = 2  # Retina-Qualität
 
+# Daten-Verzögerung (Tage) - INFOnline API liefert erst nach ~2 Tagen finale Daten
+REPORT_DELAY_DAYS = 2
+
 # Farben
 BRAND_COLORS = {
     "VOL Web": "#3B82F6",      # Blau
@@ -243,14 +246,20 @@ def get_measurements(days: int = 14) -> List[Dict]:
     return records
 
 
-def process_data(records: List[Dict], week_start: date, prev_week_start: date) -> Dict:
+def process_data(records: List[Dict], week_start: date, prev_week_start: date, week_end: date = None) -> Dict:
     """
     Verarbeitet Airtable-Records in strukturierte Daten für den Bericht.
+    
+    Args:
+        week_start: Beginn der aktuellen Woche
+        prev_week_start: Beginn der Vorwoche
+        week_end: Ende der aktuellen Woche (optional, für Delay-Handling)
     
     Returns:
         Dict mit Struktur: {brand_surface: {metric: {current_sum, prev_sum, daily, wow_change}}}
     """
     data = {}
+    prev_week_end = week_start - timedelta(days=1)
     
     for record in records:
         fields = record.get("fields", {})
@@ -281,13 +290,13 @@ def process_data(records: List[Dict], week_start: date, prev_week_start: date) -
                 "daily": {}
             }
         
-        # Aktuelle Woche
-        if datum >= week_start:
+        # Aktuelle Woche (mit optionalem Enddatum)
+        if datum >= week_start and (week_end is None or datum <= week_end):
             data[key][metric]["current_sum"] += wert
             data[key][metric]["current_days"] += 1
             data[key][metric]["daily"][datum_str] = wert
         # Vorwoche
-        elif datum >= prev_week_start:
+        elif datum >= prev_week_start and datum <= prev_week_end:
             data[key][metric]["prev_sum"] += wert
             data[key][metric]["prev_days"] += 1
     
@@ -510,11 +519,12 @@ def run_weekly_report():
         print("❌ AIRTABLE_API_KEY nicht gesetzt!")
         return
     
-    # Zeiträume definieren
+    # Zeiträume definieren (mit Delay für finale API-Daten)
     today = date.today()
-    week_start = today - timedelta(days=7)
-    prev_week_start = today - timedelta(days=14)
-    period = f"{week_start.strftime('%d.%m.')} - {today.strftime('%d.%m.%Y')} (KW {today.isocalendar()[1]})"
+    data_end = today - timedelta(days=REPORT_DELAY_DAYS)  # Letzte finale Daten
+    week_start = data_end - timedelta(days=6)  # 7 Tage inklusive data_end
+    prev_week_start = week_start - timedelta(days=7)
+    period = f"{week_start.strftime('%d.%m.')} - {data_end.strftime('%d.%m.%Y')} (KW {data_end.isocalendar()[1]})"
     
     # Daten laden
     print("\n📥 Lade Daten aus Airtable...")
@@ -527,7 +537,7 @@ def run_weekly_report():
     
     # Daten verarbeiten
     print("\n📈 Verarbeite Daten...")
-    data = process_data(records, week_start, prev_week_start)
+    data = process_data(records, week_start, prev_week_start, week_end=data_end)
     
     # Statistiken ausgeben
     for key in data:

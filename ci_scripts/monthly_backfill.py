@@ -334,28 +334,29 @@ def run_monthly_backfill(start_year: int, start_month: int, end_year: int = None
                 if result["success"]:
                     value, preliminary = extract_value(result["data"], metric_key)
                     
-                    if value is not None and value > 0:
-                        stats["fetched"] += 1
-                        all_records.append({
-                            "fields": {
-                                "Datum": record_date.isoformat(),
-                                "Brand": site["brand"],
-                                "Plattform": site["surface"],
-                                "Metrik": f"{metric_name} (Monat)",
-                                "Wert": value,
-                                "Site ID": site["site_id"],
-                                "Vorläufig": preliminary,
-                                "Erfasst am": datetime.utcnow().isoformat(),
-                                "Unique Key": unique_key
-                            }
-                        })
-                    else:
-                        stats["skipped_no_data"] += 1
+                if value is not None and value > 0:
+                    stats["fetched"] += 1
+                    all_records.append({
+                        "fields": {
+                            "Datum": record_date.isoformat(),
+                            "Brand": site["brand"],
+                            "Plattform": site["surface"],
+                            "Metrik": metric_name,  # Standard-Name ohne "(Monat)" Suffix
+                            "Wert": value,
+                            "Site ID": site["site_id"],
+                            "Vorläufig": preliminary,
+                            "Erfasst am": datetime.utcnow().isoformat(),
+                            "Unique Key": unique_key  # Enthält _MONTH_ zur Unterscheidung
+                        }
+                    })
                 else:
-                    if "Keine Daten" not in result.get("error", ""):
-                        stats["errors"].append(f"{month_str} {site['name']}/{metric_name}: {result['error']}")
-                    else:
-                        stats["skipped_no_data"] += 1
+                    stats["skipped_no_data"] += 1
+            else:
+                error_msg = result.get("error", "Unbekannter Fehler")
+                if "Keine Daten" not in error_msg:
+                    stats["errors"].append(f"{month_str} {site['name']}/{metric_name}: {error_msg}")
+                else:
+                    stats["skipped_no_data"] += 1
     
     print(f"\n   ✓ Phase 1 abgeschlossen: {stats['fetched']} Records gesammelt")
     
@@ -400,12 +401,12 @@ def run_monthly_backfill(start_year: int, start_month: int, end_year: int = None
                             "Datum": record_date.isoformat(),
                             "Brand": site["brand"],
                             "Plattform": site["surface"],
-                            "Metrik": f"{metric_name} (Monat)",
+                            "Metrik": metric_name,  # "Homepage PI" ohne Suffix
                             "Wert": value,
                             "Site ID": site["site_id"],
                             "Vorläufig": preliminary,
                             "Erfasst am": datetime.utcnow().isoformat(),
-                            "Unique Key": unique_key
+                            "Unique Key": unique_key  # Enthält _MONTH_ zur Unterscheidung
                         }
                     })
                 else:
@@ -497,4 +498,6 @@ if __name__ == "__main__":
         end_month=end_month,
         dry_run=args.dry_run
     )
+
+
 

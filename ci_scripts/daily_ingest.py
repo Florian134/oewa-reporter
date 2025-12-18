@@ -36,6 +36,9 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 # Alerting-Schwellenwert (±10%)
 ALERT_THRESHOLD_PCT = 0.10
 
+# Daten-Verzögerung (Tage) - INFOnline API liefert erst nach ~2 Tagen finale Daten
+STANDARD_DELAY_DAYS = 2  # PI, Visits, Homepage PI
+
 # =============================================================================
 # SITES KONFIGURATION - Erweitert für Web + App
 # =============================================================================
@@ -504,13 +507,14 @@ def main():
         print("❌ AIRTABLE_API_KEY nicht gesetzt!")
         return
     
-    # Zieldaten: Gestern für Standard-Metriken, vor 3 Tagen für UC
-    target_date = date.today() - timedelta(days=1)
+    # Zieldaten: Vor 2 Tagen für Standard-Metriken (API liefert erst dann finale Daten!)
+    # Vor 3 Tagen für UC (zusätzliche Verzögerung für Unique Clients)
+    target_date = date.today() - timedelta(days=STANDARD_DELAY_DAYS)
     uc_target_date = date.today() - timedelta(days=UC_DELAY_DAYS)
     
-    print(f"\n📅 Standard-Metriken Datum: {target_date.isoformat()} (gestern)")
+    print(f"\n📅 Standard-Metriken Datum: {target_date.isoformat()} (vor {STANDARD_DELAY_DAYS} Tagen)")
     print(f"📅 Unique Clients Datum: {uc_target_date.isoformat()} (vor {UC_DELAY_DAYS} Tagen)")
-    print(f"   ℹ️ Unique Clients sind in der API erst nach ~2 Tagen verfügbar")
+    print(f"   ℹ️ Daten werden verzögert abgerufen um finale API-Werte zu erhalten")
     print()
     
     records_to_create = []
