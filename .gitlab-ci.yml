@@ -12,6 +12,7 @@
 
 stages:
   - run
+  - deploy
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -87,19 +88,35 @@ backfill:
     - if: $CI_COMMIT_REF_NAME == "backfill-90days" && $CI_PIPELINE_SOURCE == "trigger"
 
 # =============================================================================
-# WEEKLY REPORT v2.0 - Wöchentlicher Bericht mit großen Diagrammen
-# Triggern mit: JOB_TYPE=weekly
+# WEEKLY REPORT v3.0 - Wöchentlicher Bericht mit Charts
+# Triggern mit: JOB_TYPE=weekly ODER Branch "weekly-trigger"
 # Automatisch: Jeden Montag via Airtable Automation
+# Charts werden in public/charts/ gespeichert für GitLab Pages
 # =============================================================================
 weekly_report:
   stage: run
   image: python:3.11-slim
+  before_script:
+    # Git für Chart-Push installieren
+    - apt-get update && apt-get install -y git
+    - git config --global user.email "ci@oewa-reporter.gitlab.io"
+    - git config --global user.name "ÖWA Reporter CI"
   script:
-    - echo "📊 ÖWA Reporter - Weekly Report v2.0"
+    - echo "📊 ÖWA Reporter - Weekly Report v3.0"
     - pip install --upgrade pip
     - pip install requests python-dotenv openai plotly "kaleido==0.2.1" pandas
     - python ci_scripts/weekly_report.py
     - echo "✅ Weekly Report completed!"
+    # Charts für Pages anzeigen
+    - |
+      if [ -d "public/charts" ] && [ "$(ls -A public/charts 2>/dev/null)" ]; then
+        echo "📊 Charts erstellt:"
+        ls -la public/charts/
+      fi
+  artifacts:
+    paths:
+      - public/
+    expire_in: 1 week
   rules:
     - if: $JOB_TYPE == "weekly"
     - if: $CI_COMMIT_REF_NAME == "weekly-trigger" && $CI_PIPELINE_SOURCE == "trigger"
@@ -205,3 +222,27 @@ test_notifications:
     - echo "✅ Notification Tests completed!"
   rules:
     - if: $JOB_TYPE == "test_notifications"
+
+# =============================================================================
+# GITLAB PAGES - Hostet Charts für Teams-Reports
+# Automatisches Deployment bei Änderungen am public/ Ordner
+# URL: https://florian1143.gitlab.io/oewa-reporter/
+# =============================================================================
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - echo "📊 Deploying Charts to GitLab Pages..."
+    - ls -la public/ || echo "public/ nicht gefunden"
+    - ls -la public/charts/ 2>/dev/null || echo "Keine Charts vorhanden"
+  artifacts:
+    paths:
+      - public
+  rules:
+    # Nur deployen wenn public/ Ordner existiert und Änderungen hat
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - public/**/*
+    # Auch bei weekly/monthly Reports deployen
+    - if: $CI_COMMIT_REF_NAME == "weekly-trigger"
+    - if: $CI_COMMIT_REF_NAME == "monthly-trigger"

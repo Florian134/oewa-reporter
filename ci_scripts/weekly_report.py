@@ -244,33 +244,109 @@ def create_6week_comparison_chart(weekly_data: Dict, metric: str = "Page Impress
     return fig.to_image(format="png", scale=CHART_SCALE)
 
 
-def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
-    """Lädt ein Bild anonym zu Imgur hoch."""
-    if not image_bytes or not IMGUR_CLIENT_ID:
-        if not IMGUR_CLIENT_ID:
-            print("⚠️ IMGUR_CLIENT_ID nicht konfiguriert - Chart-Upload übersprungen")
+def upload_chart_to_gitlab(image_bytes: bytes, chart_name: str) -> Optional[str]:
+    """
+    Speichert ein Chart-Bild im public/charts/ Ordner für GitLab Pages.
+    
+    Die Bilder sind nach dem Pipeline-Deploy über GitLab Pages zugänglich:
+    https://florian1143.gitlab.io/oewa-reporter/charts/{filename}
+    """
+    if not image_bytes:
         return None
     
+    import os
+    
+    # GitLab Pages URL
+    PAGES_BASE_URL = "https://florian1143.gitlab.io/oewa-reporter"
+    
     try:
-        headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-        data = {"image": base64.b64encode(image_bytes).decode("utf-8")}
+        # Timestamp für eindeutige Dateinamen
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = chart_name.replace(" ", "_").replace("/", "_").replace("ö", "oe").replace("ä", "ae").replace("ü", "ue")
+        filename = f"{safe_name}_{timestamp}.png"
         
-        response = requests.post(
-            "https://api.imgur.com/3/image",
-            headers=headers,
-            data=data,
-            timeout=30
+        # public/charts/ Ordner erstellen (GitLab Pages Standard)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        charts_dir = os.path.join(project_root, "public", "charts")
+        os.makedirs(charts_dir, exist_ok=True)
+        
+        filepath = os.path.join(charts_dir, filename)
+        
+        # Bild speichern
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+        
+        print(f"   → Chart gespeichert: {filename}")
+        
+        # GitLab Pages URL
+        pages_url = f"{PAGES_BASE_URL}/charts/{filename}"
+        
+        return pages_url
+        
+    except Exception as e:
+        print(f"⚠️ Chart-Speicherung fehlgeschlagen: {e}")
+        return None
+
+
+def push_charts_to_gitlab():
+    """
+    Pusht die Charts zum Repository und triggert GitLab Pages Deployment.
+    """
+    import subprocess
+    import os
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    public_dir = os.path.join(project_root, "public")
+    
+    if not os.path.exists(public_dir):
+        print("   → Kein public/ Ordner vorhanden")
+        return False
+    
+    try:
+        # Git konfigurieren (für CI/CD)
+        subprocess.run(
+            ["git", "config", "user.email", "ci@oewa-reporter.gitlab.io"],
+            capture_output=True, cwd=project_root
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "ÖWA Reporter CI"],
+            capture_output=True, cwd=project_root
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            return result["data"]["link"]
+        # Charts hinzufügen
+        subprocess.run(
+            ["git", "add", "public/"],
+            capture_output=True, cwd=project_root
+        )
+        
+        # Committen
+        commit_result = subprocess.run(
+            ["git", "commit", "-m", f"chore: Weekly Report Charts {datetime.now().strftime('%Y-%m-%d %H:%M')}"],
+            capture_output=True, text=True, cwd=project_root
+        )
+        
+        if "nothing to commit" in commit_result.stdout or commit_result.returncode != 0:
+            print("   → Keine neuen Charts zum Committen")
+            return True
+        
+        # Pushen (verwendet CI_JOB_TOKEN in GitLab CI)
+        push_result = subprocess.run(
+            ["git", "push", "origin", "HEAD"],
+            capture_output=True, text=True, cwd=project_root
+        )
+        
+        if push_result.returncode == 0:
+            print("   ✅ Charts gepusht - GitLab Pages wird aktualisiert")
+            return True
         else:
-            print(f"⚠️ Imgur Upload fehlgeschlagen: {response.status_code}")
-            return None
+            print(f"   ⚠️ Git Push Info: {push_result.stderr[:200] if push_result.stderr else 'OK'}")
+            return True  # Auch bei Warnungen weitermachen
+            
     except Exception as e:
-        print(f"⚠️ Imgur Upload Fehler: {e}")
-        return None
+        print(f"   ⚠️ Git-Operationen: {e}")
+        return False
 
 
 # =============================================================================
@@ -675,7 +751,7 @@ def run_weekly_report():
             avg = m.get('avg_6_weeks', 0)
             print(f"      {metric}: {m['current_sum']:,} (vs. 6-Wochen-Ø {avg:,.0f}: {pct})")
     
-    # Diagramme erstellen und hochladen
+    # Diagramme erstellen und zu GitLab speichern
     image_urls = {}
     if PLOTLY_AVAILABLE:
         print("\n📊 Erstelle Diagramme (1600x800)...")
@@ -685,37 +761,38 @@ def run_weekly_report():
             chart_bytes = create_kpi_comparison_chart(data, "Page Impressions")
             if chart_bytes:
                 print("   → PI-Vergleich (vs. 6-Wochen-Ø) erstellt")
-                url = upload_to_imgur(chart_bytes)
+                url = upload_chart_to_gitlab(chart_bytes, "PI_Vergleich_6Wochen")
                 if url:
                     image_urls["VOL Page Impressions vs. 6-Wochen-Ø"] = url
-                    print(f"   → Hochgeladen: {url[:50]}...")
             
             # Visits Vergleich
             visits_chart = create_kpi_comparison_chart(data, "Visits")
             if visits_chart:
                 print("   → Visits-Vergleich erstellt")
-                url = upload_to_imgur(visits_chart)
+                url = upload_chart_to_gitlab(visits_chart, "Visits_Vergleich_6Wochen")
                 if url:
                     image_urls["VOL Visits vs. 6-Wochen-Ø"] = url
-                    print(f"   → Hochgeladen: {url[:50]}...")
             
             # 7-Tage Trend Chart
             trend_bytes = create_trend_chart(data, "Page Impressions")
             if trend_bytes:
                 print("   → 7-Tage-Trend erstellt")
-                url = upload_to_imgur(trend_bytes)
+                url = upload_chart_to_gitlab(trend_bytes, "PI_7Tage_Trend")
                 if url:
                     image_urls["VOL 7-Tage-Trend PI"] = url
-                    print(f"   → Hochgeladen: {url[:50]}...")
             
             # 7-Wochen-Übersicht
             week_chart = create_6week_comparison_chart(data, "Page Impressions")
             if week_chart:
                 print("   → 7-Wochen-Übersicht erstellt")
-                url = upload_to_imgur(week_chart)
+                url = upload_chart_to_gitlab(week_chart, "PI_7Wochen_Uebersicht")
                 if url:
                     image_urls["VOL 7-Wochen-Übersicht PI"] = url
-                    print(f"   → Hochgeladen: {url[:50]}...")
+            
+            # Charts nach GitLab pushen
+            if image_urls:
+                print("\n📤 Pushe Charts nach GitLab...")
+                push_charts_to_gitlab()
                     
         except Exception as e:
             print(f"   ⚠️ Diagramm-Erstellung fehlgeschlagen: {e}")
