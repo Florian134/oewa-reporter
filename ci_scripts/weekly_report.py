@@ -583,7 +583,6 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
     sections = [
         {
             "activityTitle": title,
-            "activitySubtitle": "📢 Nur VOL.AT (Vienna ausgeschlossen)",
             "facts": facts,
             "markdown": True
         },
