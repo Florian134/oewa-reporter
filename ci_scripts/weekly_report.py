@@ -468,6 +468,7 @@ def generate_gpt_summary(data: Dict, period: str) -> str:
         return "GPT-Zusammenfassung nicht verfügbar (API Key fehlt)"
     
     # Daten für den Prompt aufbereiten - NUR VOL
+    # PROFESSIONELL: Tagesdurchschnitte für fairen Vergleich
     kpi_text = ""
     for key in ["VOL_Web", "VOL_App"]:
         if key in data:
@@ -476,8 +477,9 @@ def generate_gpt_summary(data: Dict, period: str) -> str:
                 if metric in data[key]:
                     m = data[key][metric]
                     pct = f"{m['pct_change']*100:+.1f}%" if m.get('pct_change') is not None else "N/A"
-                    avg = m.get('avg_6_weeks', 0)
-                    kpi_text += f"  - {metric}: {m['current_sum']:,} (vs. 6-Wochen-Ø {avg:,.0f}: {pct})\n"
+                    daily_avg = m.get('current_avg', 0)
+                    prev_daily_avg = m.get('avg_daily_6_weeks', 0)
+                    kpi_text += f"  - {metric}: Ø {daily_avg:,.0f}/Tag (vs. 6-Wochen-Ø {prev_daily_avg:,.0f}/Tag: {pct})\n"
     
     # Beste/Schlechteste Performance identifizieren
     changes = []
@@ -501,10 +503,11 @@ def generate_gpt_summary(data: Dict, period: str) -> str:
 Erstelle einen klaren, kompakten EXECUTIVE SUMMARY für das Management von Russmedia.
 
 WICHTIG: Dieser Bericht betrifft NUR VOL.AT (Web + App). Vienna ist NICHT enthalten.
+WICHTIG: Alle KPIs sind als TAGESDURCHSCHNITTE angegeben für fairen Vergleich!
 
 ═══════════════════════════════════════════════════════════════
 📅 BERICHTSZEITRAUM: {period}
-📊 VERGLEICH: Aktuelle Woche vs. Durchschnitt der letzten 6 Wochen
+📊 VERGLEICH: Ø pro Tag vs. Ø pro Tag der letzten 6 Wochen
 ═══════════════════════════════════════════════════════════════
 
 KPI-DATEN (nur VOL.AT):
@@ -598,19 +601,22 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
     # Facts aufbauen - NUR VOL
     facts = [
         {"name": "📅 Zeitraum", "value": period},
-        {"name": "📊 Vergleich", "value": f"vs. Ø der letzten {COMPARISON_WEEKS} Wochen"}
+        {"name": "📊 Vergleich", "value": f"Ø/Tag vs. Ø/Tag der letzten {COMPARISON_WEEKS} Wochen"}
     ]
     
     # VOL Web - alle Metriken inkl. Homepage PI
+    # PROFESSIONELL: Tagesdurchschnitte anzeigen für fairen Vergleich
     if "VOL_Web" in data:
         for metric in ["Page Impressions", "Visits", "Homepage PI", "Unique Clients"]:
             if metric in data["VOL_Web"]:
                 m = data["VOL_Web"][metric]
                 if m.get("current_sum", 0) > 0:  # Nur anzeigen wenn Daten vorhanden
                     pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
+                    avg_value = m.get("current_avg", 0)
+                    days = m.get("current_days", 0)
                     facts.append({
                         "name": f"📊 VOL Web {metric}",
-                        "value": f"{m['current_sum']:,}{pct}"
+                        "value": f"Ø {avg_value:,.0f}/Tag{pct}"
                     })
     
     # VOL App - OHNE Homepage PI (existiert nicht für Apps)
@@ -620,9 +626,10 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
                 m = data["VOL_App"][metric]
                 if m.get("current_sum", 0) > 0:  # Nur anzeigen wenn Daten vorhanden
                     pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
+                    avg_value = m.get("current_avg", 0)
                     facts.append({
                         "name": f"📊 VOL App {metric}",
-                        "value": f"{m['current_sum']:,}{pct}"
+                        "value": f"Ø {avg_value:,.0f}/Tag{pct}"
                     })
     
     # Sections
