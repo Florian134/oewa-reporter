@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Weekly Report Script v2.0
+Weekly Report Script v3.0
 ==========================
 Erstellt einen wöchentlichen Bericht mit:
-- Zusammenfassung aller KPIs (PI, Visits, UC, HP-PI)
-- Web + App Properties
-- WoW-Vergleich (Week-over-Week)
+- NUR VOL.AT (Vienna ausgeschlossen gemäß Anforderung)
+- 6-Wochen-Vergleich (aktuelle Woche vs. letzte 6 Wochen)
+- Prozentuelle Veränderungen für alle KPIs
+- Streamlit-Diagramme als klickbare Bilder
 - GPT-generierte Executive Summary
-- Teams-Benachrichtigung mit großen Diagrammen (1600x800 PNG)
+- Teams-Benachrichtigung
 
 Nutzung:
     python ci_scripts/weekly_report.py
@@ -49,16 +50,17 @@ CHART_SCALE = 2  # Retina-Qualität
 # Daten-Verzögerung (Tage) - INFOnline API liefert erst nach ~2 Tagen finale Daten
 REPORT_DELAY_DAYS = 2
 
-# Farben
+# Farben - NUR VOL (Vienna ausgeschlossen)
 BRAND_COLORS = {
     "VOL Web": "#3B82F6",      # Blau
     "VOL App": "#60A5FA",      # Hellblau
-    "Vienna Web": "#8B5CF6",   # Lila
-    "Vienna App": "#A78BFA"    # Helllila
 }
 
 # Metriken-Konfiguration
 METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
+
+# Anzahl der Vergleichswochen
+COMPARISON_WEEKS = 6
 
 
 # =============================================================================
@@ -67,32 +69,33 @@ METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
 
 def create_kpi_comparison_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
     """
-    Erstellt ein KPI-Vergleichs-Balkendiagramm (Aktuell vs. Vorwoche) als großes PNG.
+    Erstellt ein KPI-Vergleichs-Balkendiagramm (Aktuell vs. 6-Wochen-Durchschnitt) als großes PNG.
+    NUR VOL (Vienna ausgeschlossen).
     """
     if not PLOTLY_AVAILABLE:
         return None
     
     chart_data = []
     
-    for brand in ["VOL", "Vienna"]:
-        for surface in ["Web", "App"]:
-            key = f"{brand}_{surface}"
-            if key in data and metric in data[key]:
-                metric_data = data[key][metric]
-                
-                # Aktuelle Woche
-                chart_data.append({
-                    "property": f"{brand} {surface}",
-                    "wert": metric_data.get("current_sum", 0),
-                    "periode": "Aktuelle Woche"
-                })
-                
-                # Vorwoche
-                chart_data.append({
-                    "property": f"{brand} {surface}",
-                    "wert": metric_data.get("prev_sum", 0),
-                    "periode": "Vorwoche"
-                })
+    # NUR VOL - Vienna ausgeschlossen
+    for surface in ["Web", "App"]:
+        key = f"VOL_{surface}"
+        if key in data and metric in data[key]:
+            metric_data = data[key][metric]
+            
+            # Aktuelle Woche
+            chart_data.append({
+                "property": f"VOL {surface}",
+                "wert": metric_data.get("current_sum", 0),
+                "periode": "Aktuelle Woche"
+            })
+            
+            # 6-Wochen-Durchschnitt
+            chart_data.append({
+                "property": f"VOL {surface}",
+                "wert": metric_data.get("avg_6_weeks", 0),
+                "periode": "Ø 6 Wochen"
+            })
     
     if not chart_data:
         return None
@@ -105,10 +108,10 @@ def create_kpi_comparison_chart(data: Dict, metric: str = "Page Impressions") ->
         y="wert",
         color="periode",
         barmode="group",
-        title=f"📊 {metric} - Wochenvergleich",
+        title=f"📊 {metric} - Aktuelle Woche vs. 6-Wochen-Ø (nur VOL)",
         color_discrete_map={
             "Aktuelle Woche": "#3B82F6",
-            "Vorwoche": "#93C5FD"
+            "Ø 6 Wochen": "#93C5FD"
         }
     )
     
@@ -130,23 +133,24 @@ def create_kpi_comparison_chart(data: Dict, metric: str = "Page Impressions") ->
 def create_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
     """
     Erstellt ein 7-Tage-Trend-Liniendiagramm als großes PNG.
+    NUR VOL (Vienna ausgeschlossen).
     """
     if not PLOTLY_AVAILABLE:
         return None
     
     chart_data = []
     
-    for brand in ["VOL", "Vienna"]:
-        for surface in ["Web", "App"]:
-            key = f"{brand}_{surface}"
-            if key in data and metric in data[key]:
-                daily = data[key][metric].get("daily", {})
-                for datum, wert in daily.items():
-                    chart_data.append({
-                        "datum": datum,
-                        "wert": wert,
-                        "property": f"{brand} {surface}"
-                    })
+    # NUR VOL - Vienna ausgeschlossen
+    for surface in ["Web", "App"]:
+        key = f"VOL_{surface}"
+        if key in data and metric in data[key]:
+            daily = data[key][metric].get("daily", {})
+            for datum, wert in daily.items():
+                chart_data.append({
+                    "datum": datum,
+                    "wert": wert,
+                    "property": f"VOL {surface}"
+                })
     
     if not chart_data:
         return None
@@ -160,7 +164,7 @@ def create_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional
         x="datum",
         y="wert",
         color="property",
-        title=f"📈 {metric} - 7-Tage-Trend",
+        title=f"📈 {metric} - 7-Tage-Trend (nur VOL)",
         color_discrete_map=BRAND_COLORS,
         markers=True
     )
@@ -178,6 +182,66 @@ def create_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional
     
     img_bytes = fig.to_image(format="png", scale=CHART_SCALE)
     return img_bytes
+
+
+def create_6week_comparison_chart(weekly_data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
+    """
+    Erstellt ein Balkendiagramm mit 7 Wochen (aktuelle + 6 Vorwochen).
+    Zeigt die prozentuelle Veränderung.
+    """
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    chart_data = []
+    
+    # Daten für Web und App
+    for surface in ["Web", "App"]:
+        key = f"VOL_{surface}"
+        if key in weekly_data:
+            weeks_data = weekly_data[key].get(metric, {}).get("weekly_values", [])
+            for week_info in weeks_data:
+                chart_data.append({
+                    "woche": week_info["label"],
+                    "wert": week_info["value"],
+                    "property": f"VOL {surface}",
+                    "is_current": week_info.get("is_current", False)
+                })
+    
+    if not chart_data:
+        return None
+    
+    df = pd.DataFrame(chart_data)
+    
+    fig = go.Figure()
+    
+    for surface in ["Web", "App"]:
+        surface_data = df[df["property"] == f"VOL {surface}"]
+        if not surface_data.empty:
+            colors = [BRAND_COLORS.get(f"VOL {surface}", "#3B82F6") if row["is_current"] 
+                     else "#93C5FD" for _, row in surface_data.iterrows()]
+            
+            fig.add_trace(go.Bar(
+                x=surface_data["woche"],
+                y=surface_data["wert"],
+                name=f"VOL {surface}",
+                marker_color=colors,
+                text=surface_data["wert"].apply(lambda x: f"{x:,.0f}".replace(",", ".")),
+                textposition="outside"
+            ))
+    
+    fig.update_layout(
+        title=f"📊 {metric} - 7-Wochen-Übersicht (nur VOL)",
+        yaxis=dict(tickformat=",", title=""),
+        xaxis_title="",
+        barmode="group",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        width=CHART_WIDTH,
+        height=CHART_HEIGHT,
+        font=dict(size=14),
+        title_font_size=20
+    )
+    
+    return fig.to_image(format="png", scale=CHART_SCALE)
 
 
 def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
@@ -213,8 +277,13 @@ def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
 # DATEN-FUNKTIONEN
 # =============================================================================
 
-def get_measurements(days: int = 14) -> List[Dict]:
-    """Holt Measurements der letzten X Tage aus Airtable"""
+def get_measurements(days: int = 56) -> List[Dict]:
+    """
+    Holt Measurements der letzten X Tage aus Airtable.
+    Standard: 56 Tage (8 Wochen) für 6-Wochen-Vergleich.
+    
+    FILTER: Nur VOL-Daten (Vienna ausgeschlossen)
+    """
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
     
@@ -225,7 +294,8 @@ def get_measurements(days: int = 14) -> List[Dict]:
     
     while True:
         params = {
-            "filterByFormula": f"IS_AFTER({{Datum}}, '{cutoff_date}')",
+            # NUR VOL-Daten laden + Tagesdaten (keine monatlichen)
+            "filterByFormula": f"AND(IS_AFTER({{Datum}}, '{cutoff_date}'), {{Brand}} = 'VOL', FIND('_MONTH_', {{Unique Key}}) = 0)",
             "pageSize": 100
         }
         if offset:
@@ -246,21 +316,38 @@ def get_measurements(days: int = 14) -> List[Dict]:
     return records
 
 
-def process_data(records: List[Dict], week_start: date, prev_week_start: date, week_end: date = None) -> Dict:
+def process_data(records: List[Dict], week_start: date, week_end: date = None) -> Dict:
     """
     Verarbeitet Airtable-Records in strukturierte Daten für den Bericht.
     
+    ERWEITERT: Berechnet 6-Wochen-Vergleich statt nur Vorwoche.
+    NUR VOL-Daten (Vienna wird bereits beim Laden gefiltert).
+    
     Args:
         week_start: Beginn der aktuellen Woche
-        prev_week_start: Beginn der Vorwoche
-        week_end: Ende der aktuellen Woche (optional, für Delay-Handling)
+        week_end: Ende der aktuellen Woche (für Delay-Handling)
     
     Returns:
-        Dict mit Struktur: {brand_surface: {metric: {current_sum, prev_sum, daily, wow_change}}}
+        Dict mit Struktur: {brand_surface: {metric: {current_sum, avg_6_weeks, weekly_values, pct_change}}}
     """
-    data = {}
-    prev_week_end = week_start - timedelta(days=1)
+    # Definiere alle 7 Wochen (aktuelle + 6 Vorwochen)
+    weeks = []
+    for i in range(COMPARISON_WEEKS + 1):  # 0 = aktuelle Woche, 1-6 = Vorwochen
+        w_start = week_start - timedelta(weeks=i)
+        w_end = w_start + timedelta(days=6)
+        if i == 0 and week_end:
+            w_end = week_end  # Aktuelle Woche mit Delay-Enddatum
+        weeks.append({
+            "start": w_start,
+            "end": w_end,
+            "label": f"KW{w_start.isocalendar()[1]}",
+            "is_current": i == 0
+        })
     
+    # Datenstruktur initialisieren
+    data = {}
+    
+    # Records nach Datum zuordnen
     for record in records:
         fields = record.get("fields", {})
         datum_str = fields.get("Datum")
@@ -270,6 +357,10 @@ def process_data(records: List[Dict], week_start: date, prev_week_start: date, w
         wert = fields.get("Wert")
         
         if not all([datum_str, brand, metric, wert]):
+            continue
+        
+        # NUR VOL (wird bereits beim Laden gefiltert, aber sicherheitshalber)
+        if brand != "VOL":
             continue
         
         try:
@@ -284,34 +375,49 @@ def process_data(records: List[Dict], week_start: date, prev_week_start: date, w
         if metric not in data[key]:
             data[key][metric] = {
                 "current_sum": 0,
-                "prev_sum": 0,
                 "current_days": 0,
-                "prev_days": 0,
-                "daily": {}
+                "daily": {},
+                "weekly_values": [{"label": w["label"], "value": 0, "days": 0, "is_current": w["is_current"]} for w in weeks],
+                "weeks_with_data": 0
             }
         
-        # Aktuelle Woche (mit optionalem Enddatum)
-        if datum >= week_start and (week_end is None or datum <= week_end):
-            data[key][metric]["current_sum"] += wert
-            data[key][metric]["current_days"] += 1
-            data[key][metric]["daily"][datum_str] = wert
-        # Vorwoche
-        elif datum >= prev_week_start and datum <= prev_week_end:
-            data[key][metric]["prev_sum"] += wert
-            data[key][metric]["prev_days"] += 1
+        # Welche Woche?
+        for idx, week in enumerate(weeks):
+            if week["start"] <= datum <= week["end"]:
+                data[key][metric]["weekly_values"][idx]["value"] += wert
+                data[key][metric]["weekly_values"][idx]["days"] += 1
+                
+                # Aktuelle Woche separat tracken
+                if idx == 0:
+                    data[key][metric]["current_sum"] += wert
+                    data[key][metric]["current_days"] += 1
+                    data[key][metric]["daily"][datum_str] = wert
+                break
     
-    # WoW-Änderungen berechnen
+    # Berechnungen: 6-Wochen-Durchschnitt und prozentuelle Änderungen
     for key in data:
         for metric in data[key]:
             m = data[key][metric]
-            if m["prev_sum"] > 0:
-                m["wow_change"] = (m["current_sum"] - m["prev_sum"]) / m["prev_sum"]
-            else:
-                m["wow_change"] = None
             
-            # Durchschnitte
+            # 6-Wochen-Durchschnitt (ohne aktuelle Woche)
+            prev_weeks = m["weekly_values"][1:]  # Index 1-6
+            weeks_with_data = [w for w in prev_weeks if w["value"] > 0]
+            
+            if weeks_with_data:
+                m["avg_6_weeks"] = sum(w["value"] for w in weeks_with_data) / len(weeks_with_data)
+                m["weeks_with_data"] = len(weeks_with_data)
+                
+                # Prozentuelle Änderung vs. 6-Wochen-Durchschnitt
+                if m["avg_6_weeks"] > 0:
+                    m["pct_change"] = (m["current_sum"] - m["avg_6_weeks"]) / m["avg_6_weeks"]
+                else:
+                    m["pct_change"] = None
+            else:
+                m["avg_6_weeks"] = 0
+                m["pct_change"] = None
+            
+            # Durchschnitt pro Tag (aktuelle Woche)
             m["current_avg"] = m["current_sum"] / max(1, m["current_days"])
-            m["prev_avg"] = m["prev_sum"] / max(1, m["prev_days"])
     
     return data
 
@@ -321,47 +427,54 @@ def process_data(records: List[Dict], week_start: date, prev_week_start: date, w
 # =============================================================================
 
 def generate_gpt_summary(data: Dict, period: str) -> str:
-    """Generiert eine GPT-Zusammenfassung gemäß der neuen Vorlage."""
+    """
+    Generiert eine GPT-Zusammenfassung.
+    NUR VOL-Daten mit 6-Wochen-Vergleich.
+    """
     if not OPENAI_API_KEY:
         return "GPT-Zusammenfassung nicht verfügbar (API Key fehlt)"
     
-    # Daten für den Prompt aufbereiten
+    # Daten für den Prompt aufbereiten - NUR VOL
     kpi_text = ""
-    for key in ["VOL_Web", "VOL_App", "Vienna_Web", "Vienna_App"]:
+    for key in ["VOL_Web", "VOL_App"]:
         if key in data:
             kpi_text += f"\n**{key.replace('_', ' ')}:**\n"
             for metric in METRICS:
                 if metric in data[key]:
                     m = data[key][metric]
-                    wow = f"{m['wow_change']*100:+.1f}%" if m.get('wow_change') is not None else "N/A"
-                    kpi_text += f"  - {metric}: {m['current_sum']:,} (WoW: {wow})\n"
+                    pct = f"{m['pct_change']*100:+.1f}%" if m.get('pct_change') is not None else "N/A"
+                    avg = m.get('avg_6_weeks', 0)
+                    kpi_text += f"  - {metric}: {m['current_sum']:,} (vs. 6-Wochen-Ø {avg:,.0f}: {pct})\n"
     
     # Beste/Schlechteste Performance identifizieren
     changes = []
     for key in data:
         for metric in data[key]:
             m = data[key][metric]
-            if m.get("wow_change") is not None:
+            if m.get("pct_change") is not None:
                 changes.append({
                     "name": f"{key.replace('_', ' ')} {metric}",
-                    "change": m["wow_change"]
+                    "change": m["pct_change"]
                 })
     
     if changes:
         best = max(changes, key=lambda x: x["change"])
         worst = min(changes, key=lambda x: x["change"])
-        highlight_text = f"🏆 TOP: {best['name']} ({best['change']*100:+.1f}%)\n📉 LOW: {worst['name']} ({worst['change']*100:+.1f}%)"
+        highlight_text = f"🏆 TOP: {best['name']} ({best['change']*100:+.1f}% vs. 6-Wochen-Ø)\n📉 LOW: {worst['name']} ({worst['change']*100:+.1f}% vs. 6-Wochen-Ø)"
     else:
         highlight_text = "Keine Vergleichsdaten verfügbar"
     
     prompt = f"""Du bist ein Senior-Web-Analytics-Experte für österreichische Medienunternehmen.
 Erstelle einen klaren, kompakten EXECUTIVE SUMMARY für das Management von Russmedia.
 
+WICHTIG: Dieser Bericht betrifft NUR VOL.AT (Web + App). Vienna ist NICHT enthalten.
+
 ═══════════════════════════════════════════════════════════════
 📅 BERICHTSZEITRAUM: {period}
+📊 VERGLEICH: Aktuelle Woche vs. Durchschnitt der letzten 6 Wochen
 ═══════════════════════════════════════════════════════════════
 
-KPI-DATEN:
+KPI-DATEN (nur VOL.AT):
 {kpi_text}
 
 PERFORMANCE-ÜBERSICHT:
@@ -372,19 +485,19 @@ PERFORMANCE-ÜBERSICHT:
 Erstelle folgende Struktur (EXAKT einhalten):
 
 **📈 HIGHLIGHT DER WOCHE**
-[1 Satz – wichtigste Erkenntnis, z.B. stärkste Steigerung oder kritischster Rückgang.]
+[1 Satz – wichtigste Erkenntnis, z.B. stärkste Steigerung oder kritischster Rückgang vs. 6-Wochen-Ø.]
 
-**📊 WEEK-OVER-WEEK (WoW)**
-[2–3 Sätze – Entwicklung der KPIs (Visits, UC, PI, HP-PI).
-Formuliere aktiv: "Visits steigen um +3,2%". Hebe wesentliche Trends hervor.
-Vergleiche Web vs. App Performance.]
+**📊 6-WOCHEN-VERGLEICH**
+[2–3 Sätze – Entwicklung der KPIs im Vergleich zum 6-Wochen-Durchschnitt.
+Formuliere aktiv: "Visits liegen +3,2% über dem 6-Wochen-Durchschnitt".
+Vergleiche Web vs. App Performance bei VOL.]
 
 **🧭 KONTEXT & EINORDNUNG**
 [1–2 Sätze – saisonale Muster (Wochenende, Feiertage, News-Lage),
-Abweichungen aufgrund externer Faktoren. Dezember = Adventzeit.]
+Abweichungen aufgrund externer Faktoren.]
 
 **✅ GESAMTBEWERTUNG**
-[1 Satz – Gesamtentwicklung der Woche (positiv/stabil/leicht rückläufig/kritisch).]
+[1 Satz – Gesamtentwicklung der Woche für VOL.AT (positiv/stabil/leicht rückläufig/kritisch).]
 
 STILVORGABEN:
 - Professionell, prägnant, datengetrieben
@@ -422,19 +535,22 @@ STILVORGABEN:
 # =============================================================================
 
 def send_teams_report(title: str, summary: str, data: Dict, period: str, image_urls: Dict[str, str] = None):
-    """Sendet den Wochenbericht an Teams mit Diagrammen."""
+    """
+    Sendet den Wochenbericht an Teams mit Diagrammen.
+    NUR VOL-Daten mit 6-Wochen-Vergleich.
+    """
     if not TEAMS_WEBHOOK_URL:
         print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
         return
     
-    # Farbe basierend auf Gesamtperformance
+    # Farbe basierend auf Gesamtperformance (vs. 6-Wochen-Ø)
     total_positive = 0
     total_negative = 0
     for key in data:
         for metric in data[key]:
             m = data[key][metric]
-            if m.get("wow_change") is not None:
-                if m["wow_change"] > 0:
+            if m.get("pct_change") is not None:
+                if m["pct_change"] > 0:
                     total_positive += 1
                 else:
                     total_negative += 1
@@ -446,22 +562,28 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
     else:
         color = "17A2B8"  # Blau (neutral)
     
-    # Facts aufbauen
-    facts = [{"name": "📅 Zeitraum", "value": period}]
+    # Facts aufbauen - NUR VOL
+    facts = [
+        {"name": "📅 Zeitraum", "value": period},
+        {"name": "📊 Vergleich", "value": f"vs. Ø der letzten {COMPARISON_WEEKS} Wochen"}
+    ]
     
-    for key in ["VOL_Web", "VOL_App", "Vienna_Web", "Vienna_App"]:
-        if key in data and "Page Impressions" in data[key]:
-            m = data[key]["Page Impressions"]
-            wow = f" ({m['wow_change']*100:+.1f}%)" if m.get('wow_change') is not None else ""
-            facts.append({
-                "name": f"📊 {key.replace('_', ' ')} PI",
-                "value": f"{m['current_sum']:,}{wow}"
-            })
+    for key in ["VOL_Web", "VOL_App"]:
+        if key in data:
+            for metric in ["Page Impressions", "Visits"]:
+                if metric in data[key]:
+                    m = data[key][metric]
+                    pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
+                    facts.append({
+                        "name": f"📊 {key.replace('_', ' ')} {metric}",
+                        "value": f"{m['current_sum']:,}{pct}"
+                    })
     
     # Sections
     sections = [
         {
             "activityTitle": title,
+            "activitySubtitle": "📢 Nur VOL.AT (Vienna ausgeschlossen)",
             "facts": facts,
             "markdown": True
         },
@@ -477,7 +599,7 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
             if url:
                 sections.append({
                     "title": f"📊 {chart_name}",
-                    "text": f"[🔍 Klicken zum Vergrößern]({url})",
+                    "text": f"[🔍 **Klicken zum Vergrößern**]({url})",
                     "images": [{"image": url, "title": chart_name}]
                 })
     
@@ -509,10 +631,14 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
 # =============================================================================
 
 def run_weekly_report():
-    """Hauptfunktion für den Wochenbericht"""
+    """
+    Hauptfunktion für den Wochenbericht.
+    NUR VOL.AT mit 6-Wochen-Vergleich.
+    """
     print("=" * 70)
-    print("📊 ÖWA WEEKLY REPORT v2.0")
-    print("   Web + App | PI + Visits + UC + HP-PI")
+    print("📊 ÖWA WEEKLY REPORT v3.0")
+    print("   NUR VOL.AT (Web + App)")
+    print(f"   Vergleich: Aktuelle Woche vs. {COMPARISON_WEEKS}-Wochen-Durchschnitt")
     print("=" * 70)
     
     if not AIRTABLE_API_KEY:
@@ -523,13 +649,15 @@ def run_weekly_report():
     today = date.today()
     data_end = today - timedelta(days=REPORT_DELAY_DAYS)  # Letzte finale Daten
     week_start = data_end - timedelta(days=6)  # 7 Tage inklusive data_end
-    prev_week_start = week_start - timedelta(days=7)
     period = f"{week_start.strftime('%d.%m.')} - {data_end.strftime('%d.%m.%Y')} (KW {data_end.isocalendar()[1]})"
     
-    # Daten laden
-    print("\n📥 Lade Daten aus Airtable...")
-    records = get_measurements(days=14)
-    print(f"   → {len(records)} Datensätze geladen")
+    print(f"\n📅 Berichtszeitraum: {period}")
+    print(f"📊 Vergleich mit: Durchschnitt der letzten {COMPARISON_WEEKS} Wochen")
+    
+    # Daten laden (56 Tage = 8 Wochen für 6-Wochen-Vergleich)
+    print("\n📥 Lade VOL-Daten aus Airtable...")
+    records = get_measurements(days=56)
+    print(f"   → {len(records)} Datensätze geladen (nur VOL)")
     
     if not records:
         print("❌ Keine Daten gefunden!")
@@ -537,15 +665,16 @@ def run_weekly_report():
     
     # Daten verarbeiten
     print("\n📈 Verarbeite Daten...")
-    data = process_data(records, week_start, prev_week_start, week_end=data_end)
+    data = process_data(records, week_start, week_end=data_end)
     
     # Statistiken ausgeben
     for key in data:
         print(f"\n   {key}:")
         for metric in data[key]:
             m = data[key][metric]
-            wow = f"{m['wow_change']*100:+.1f}%" if m.get('wow_change') is not None else "N/A"
-            print(f"      {metric}: {m['current_sum']:,} (WoW: {wow})")
+            pct = f"{m['pct_change']*100:+.1f}%" if m.get('pct_change') is not None else "N/A"
+            avg = m.get('avg_6_weeks', 0)
+            print(f"      {metric}: {m['current_sum']:,} (vs. 6-Wochen-Ø {avg:,.0f}: {pct})")
     
     # Diagramme erstellen und hochladen
     image_urls = {}
@@ -553,22 +682,40 @@ def run_weekly_report():
         print("\n📊 Erstelle Diagramme (1600x800)...")
         
         try:
-            # PI Vergleich
+            # PI Vergleich (Aktuell vs. 6-Wochen-Ø)
             chart_bytes = create_kpi_comparison_chart(data, "Page Impressions")
             if chart_bytes:
-                print("   → PI-Vergleich erstellt")
+                print("   → PI-Vergleich (vs. 6-Wochen-Ø) erstellt")
                 url = upload_to_imgur(chart_bytes)
                 if url:
-                    image_urls["Page Impressions Vergleich"] = url
+                    image_urls["VOL Page Impressions vs. 6-Wochen-Ø"] = url
                     print(f"   → Hochgeladen: {url[:50]}...")
             
-            # Trend Chart
+            # Visits Vergleich
+            visits_chart = create_kpi_comparison_chart(data, "Visits")
+            if visits_chart:
+                print("   → Visits-Vergleich erstellt")
+                url = upload_to_imgur(visits_chart)
+                if url:
+                    image_urls["VOL Visits vs. 6-Wochen-Ø"] = url
+                    print(f"   → Hochgeladen: {url[:50]}...")
+            
+            # 7-Tage Trend Chart
             trend_bytes = create_trend_chart(data, "Page Impressions")
             if trend_bytes:
-                print("   → Trend-Diagramm erstellt")
+                print("   → 7-Tage-Trend erstellt")
                 url = upload_to_imgur(trend_bytes)
                 if url:
-                    image_urls["7-Tage-Trend"] = url
+                    image_urls["VOL 7-Tage-Trend PI"] = url
+                    print(f"   → Hochgeladen: {url[:50]}...")
+            
+            # 7-Wochen-Übersicht
+            week_chart = create_6week_comparison_chart(data, "Page Impressions")
+            if week_chart:
+                print("   → 7-Wochen-Übersicht erstellt")
+                url = upload_to_imgur(week_chart)
+                if url:
+                    image_urls["VOL 7-Wochen-Übersicht PI"] = url
                     print(f"   → Hochgeladen: {url[:50]}...")
                     
         except Exception as e:
@@ -581,11 +728,11 @@ def run_weekly_report():
     
     # Teams Bericht
     print("\n📤 Sende Teams-Bericht...")
-    title = f"📊 ÖWA Wochenbericht - KW {today.isocalendar()[1]}"
+    title = f"📊 ÖWA Wochenbericht VOL.AT - KW {data_end.isocalendar()[1]}"
     send_teams_report(title, summary, data, period, image_urls)
     
     print("\n" + "=" * 70)
-    print("✅ WEEKLY REPORT v2.0 ABGESCHLOSSEN")
+    print("✅ WEEKLY REPORT v3.0 ABGESCHLOSSEN")
     print("=" * 70)
 
 

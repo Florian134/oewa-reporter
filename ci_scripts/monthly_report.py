@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Monthly Report Script v1.0
+Monthly Report Script v2.0
 ===========================
 Erstellt einen monatlichen Bericht mit:
-- Zusammenfassung aller KPIs (PI, Visits, UC, HP-PI)
-- Web + App Properties
+- NUR VOL.AT (Vienna ausgeschlossen)
+- Getrennte Darstellung: Web vs. App
 - MoM-Vergleich (Month-over-Month)
 - GPT-generierte Executive Summary
-- Teams-Benachrichtigung mit großen Diagrammen (1600x800 PNG)
+- Teams-Benachrichtigung mit Diagrammen (klickbar/vergrößerbar)
 
 Wird am 1. jedes Monats ausgeführt (Airtable Automation).
 
@@ -50,15 +50,19 @@ CHART_WIDTH = 1600
 CHART_HEIGHT = 800
 CHART_SCALE = 2
 
-# Farben
+# Farben - NUR VOL (Vienna ausgeschlossen)
 BRAND_COLORS = {
-    "VOL Web": "#3B82F6",
-    "VOL App": "#60A5FA",
-    "Vienna Web": "#8B5CF6",
-    "Vienna App": "#A78BFA"
+    "VOL Web": "#3B82F6",      # Blau
+    "VOL App": "#60A5FA",      # Hellblau
 }
 
 METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
+
+# Plattform-Farben für getrennte Darstellung
+PLATFORM_COLORS = {
+    "Web": "#3B82F6",      # Blau
+    "App": "#10B981",      # Grün
+}
 
 
 # =============================================================================
@@ -85,14 +89,18 @@ def get_previous_month(year: int, month: int) -> tuple:
 # =============================================================================
 
 def create_monthly_comparison_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
-    """Erstellt ein Monatsvergleichs-Balkendiagramm."""
+    """
+    Erstellt ein Monatsvergleichs-Balkendiagramm.
+    NUR VOL mit Web/App Trennung.
+    """
     if not PLOTLY_AVAILABLE:
         return None
     
     chart_data = []
     
-    for key in data:
-        if metric in data[key]:
+    # NUR VOL
+    for key in ["VOL_Web", "VOL_App"]:
+        if key in data and metric in data[key]:
             m = data[key][metric]
             
             chart_data.append({
@@ -118,7 +126,7 @@ def create_monthly_comparison_chart(data: Dict, metric: str = "Page Impressions"
         y="wert",
         color="periode",
         barmode="group",
-        title=f"📊 {metric} - Monatsvergleich (MoM)",
+        title=f"📊 VOL {metric} - Monatsvergleich (MoM)",
         color_discrete_map={
             "Aktueller Monat": "#3B82F6",
             "Vormonat": "#93C5FD"
@@ -139,15 +147,66 @@ def create_monthly_comparison_chart(data: Dict, metric: str = "Page Impressions"
     return fig.to_image(format="png", scale=CHART_SCALE)
 
 
-def create_daily_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
-    """Erstellt ein Tages-Trend-Liniendiagramm für den ganzen Monat."""
+def create_web_vs_app_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
+    """
+    Erstellt ein Vergleichsdiagramm Web vs. App für VOL.
+    """
     if not PLOTLY_AVAILABLE:
         return None
     
     chart_data = []
     
-    for key in data:
-        if metric in data[key]:
+    for platform in ["Web", "App"]:
+        key = f"VOL_{platform}"
+        if key in data and metric in data[key]:
+            m = data[key][metric]
+            chart_data.append({
+                "plattform": platform,
+                "wert": m.get("current_sum", 0),
+                "mom_change": m.get("mom_change", 0) or 0
+            })
+    
+    if not chart_data:
+        return None
+    
+    df = pd.DataFrame(chart_data)
+    
+    # Pie Chart für Anteil
+    fig = go.Figure()
+    
+    fig.add_trace(go.Pie(
+        labels=df["plattform"],
+        values=df["wert"],
+        hole=0.4,
+        marker_colors=[PLATFORM_COLORS.get(p, "#666") for p in df["plattform"]],
+        textinfo="label+percent+value",
+        texttemplate="%{label}<br>%{value:,.0f}<br>(%{percent})"
+    ))
+    
+    fig.update_layout(
+        title=f"📊 VOL {metric} - Web vs. App Anteil",
+        width=CHART_WIDTH,
+        height=CHART_HEIGHT,
+        font=dict(size=14),
+        title_font_size=20
+    )
+    
+    return fig.to_image(format="png", scale=CHART_SCALE)
+
+
+def create_daily_trend_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
+    """
+    Erstellt ein Tages-Trend-Liniendiagramm für den ganzen Monat.
+    NUR VOL mit Web/App Trennung.
+    """
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    chart_data = []
+    
+    # NUR VOL
+    for key in ["VOL_Web", "VOL_App"]:
+        if key in data and metric in data[key]:
             daily = data[key][metric].get("daily", {})
             for datum, wert in daily.items():
                 chart_data.append({
@@ -168,7 +227,7 @@ def create_daily_trend_chart(data: Dict, metric: str = "Page Impressions") -> Op
         x="datum",
         y="wert",
         color="property",
-        title=f"📈 {metric} - Monatstrend",
+        title=f"📈 VOL {metric} - Monatstrend (Web vs. App)",
         color_discrete_map=BRAND_COLORS,
         markers=True
     )
@@ -215,7 +274,10 @@ def upload_to_imgur(image_bytes: bytes) -> Optional[str]:
 # =============================================================================
 
 def get_measurements_for_month(year: int, month: int) -> List[Dict]:
-    """Holt alle Measurements für einen spezifischen Monat."""
+    """
+    Holt alle Measurements für einen spezifischen Monat.
+    NUR VOL-Daten (Vienna ausgeschlossen) und nur Tagesdaten.
+    """
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
     
@@ -226,7 +288,8 @@ def get_measurements_for_month(year: int, month: int) -> List[Dict]:
     
     while True:
         params = {
-            "filterByFormula": f"AND(IS_AFTER({{Datum}}, '{(start - timedelta(days=1)).isoformat()}'), IS_BEFORE({{Datum}}, '{(end + timedelta(days=1)).isoformat()}'))",
+            # NUR VOL + nur Tagesdaten (keine monatlichen)
+            "filterByFormula": f"AND(IS_AFTER({{Datum}}, '{(start - timedelta(days=1)).isoformat()}'), IS_BEFORE({{Datum}}, '{(end + timedelta(days=1)).isoformat()}'), {{Brand}} = 'VOL', FIND('_MONTH_', {{Unique Key}}) = 0)",
             "pageSize": 100
         }
         if offset:
@@ -316,13 +379,35 @@ def process_monthly_data(current_records: List[Dict], prev_records: List[Dict]) 
 # =============================================================================
 
 def generate_monthly_gpt_summary(data: Dict, current_month: str, prev_month: str) -> str:
-    """Generiert eine GPT-Zusammenfassung für den Monatsbericht."""
+    """
+    Generiert eine GPT-Zusammenfassung für den Monatsbericht.
+    NUR VOL mit Web/App Trennung.
+    """
     if not OPENAI_API_KEY:
         return "GPT-Zusammenfassung nicht verfügbar (API Key fehlt)"
     
-    # Daten aufbereiten
+    # Daten aufbereiten - NUR VOL
     kpi_text = ""
-    for key in ["VOL_Web", "VOL_App", "Vienna_Web", "Vienna_App"]:
+    
+    # Gesamt-KPIs (Web + App kombiniert)
+    total_kpis = {}
+    for metric in METRICS:
+        total = 0
+        total_prev = 0
+        for key in ["VOL_Web", "VOL_App"]:
+            if key in data and metric in data[key]:
+                total += data[key][metric].get("current_sum", 0)
+                total_prev += data[key][metric].get("prev_sum", 0)
+        if total > 0:
+            mom = ((total - total_prev) / total_prev * 100) if total_prev > 0 else 0
+            total_kpis[metric] = {"total": total, "mom": mom}
+    
+    kpi_text += "\n**VOL GESAMT (Web + App):**\n"
+    for metric, vals in total_kpis.items():
+        kpi_text += f"  - {metric}: {vals['total']:,} (MoM: {vals['mom']:+.1f}%)\n"
+    
+    # Getrennt nach Web/App
+    for key in ["VOL_Web", "VOL_App"]:
         if key in data:
             kpi_text += f"\n**{key.replace('_', ' ')}:**\n"
             for metric in METRICS:
@@ -330,6 +415,15 @@ def generate_monthly_gpt_summary(data: Dict, current_month: str, prev_month: str
                     m = data[key][metric]
                     mom = f"{m['mom_change']*100:+.1f}%" if m.get('mom_change') is not None else "N/A"
                     kpi_text += f"  - {metric}: {m['current_sum']:,} (MoM: {mom})\n"
+    
+    # Web vs. App Anteil berechnen
+    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
+    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
+    total_pi = web_pi + app_pi
+    web_share = (web_pi / total_pi * 100) if total_pi > 0 else 0
+    app_share = (app_pi / total_pi * 100) if total_pi > 0 else 0
+    
+    platform_text = f"📱 Web-Anteil: {web_share:.1f}% | App-Anteil: {app_share:.1f}%"
     
     # Beste/Schlechteste Performance
     changes = []
@@ -352,13 +446,18 @@ def generate_monthly_gpt_summary(data: Dict, current_month: str, prev_month: str
     prompt = f"""Du bist ein Senior-Web-Analytics-Experte für österreichische Medienunternehmen.
 Erstelle einen klaren, kompakten EXECUTIVE SUMMARY für das Management von Russmedia.
 
+WICHTIG: Dieser Bericht betrifft NUR VOL.AT. Vienna ist NICHT enthalten.
+
 ═══════════════════════════════════════════════════════════════
-📅 MONATSBERICHT: {current_month}
+📅 MONATSBERICHT: {current_month} (nur VOL.AT)
 📊 VERGLEICH MIT: {prev_month}
 ═══════════════════════════════════════════════════════════════
 
 KPI-DATEN (MONATSSUMMEN):
 {kpi_text}
+
+PLATTFORM-VERTEILUNG:
+{platform_text}
 
 PERFORMANCE-ÜBERSICHT:
 {highlight_text}
@@ -368,25 +467,27 @@ PERFORMANCE-ÜBERSICHT:
 Erstelle folgende Struktur (EXAKT einhalten):
 
 **📈 HIGHLIGHT DES MONATS**
-[1 Satz – wichtigste Erkenntnis, z.B. stärkste Steigerung oder kritischster Rückgang.]
+[1 Satz – wichtigste Erkenntnis für VOL.AT, z.B. stärkste Steigerung oder kritischster Rückgang.]
+
+**📊 WEB vs. APP ANALYSE**
+[2–3 Sätze – Vergleiche die Performance von Web vs. App.
+Welche Plattform wächst stärker? Gibt es Verschiebungen?]
 
 **📊 MONTH-OVER-MONTH (MoM)**
-[2–3 Sätze – Entwicklung der KPIs (Visits, UC, PI, HP-PI).
-Formuliere aktiv: "Visits steigen um +3,2%". Hebe wesentliche Trends hervor.
-Vergleiche Web vs. App Performance.]
+[2–3 Sätze – Entwicklung der Gesamt-KPIs (Visits, UC, PI).
+Formuliere aktiv: "Visits steigen um +3,2%".]
 
 **🧭 KONTEXT & EINORDNUNG**
-[1–2 Sätze – saisonale Muster (Sommerloch, Advent, Ferien, News-Lage),
-Abweichungen aufgrund externer Faktoren.]
+[1–2 Sätze – saisonale Muster (Sommerloch, Advent, Ferien, News-Lage).]
 
 **✅ GESAMTBEWERTUNG**
-[1 Satz – Gesamtentwicklung des Monats (positiv/stabil/leicht rückläufig/kritisch).]
+[1 Satz – Gesamtentwicklung des Monats für VOL.AT (positiv/stabil/leicht rückläufig/kritisch).]
 
 STILVORGABEN:
 - Professionell, prägnant, datengetrieben
 - Keine Aufzählung von Rohdaten – nur Erkenntnisse
 - Fokus auf: Was bedeutet das für das Management?
-- Maximal 200 Wörter
+- Maximal 220 Wörter
 """
 
     try:
@@ -399,7 +500,7 @@ STILVORGABEN:
             json={
                 "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 600,
+                "max_tokens": 700,
                 "temperature": 0.7
             },
             timeout=60
@@ -417,7 +518,10 @@ STILVORGABEN:
 # =============================================================================
 
 def send_monthly_teams_report(title: str, summary: str, data: Dict, current_month: str, prev_month: str, image_urls: Dict = None):
-    """Sendet den Monatsbericht an Teams."""
+    """
+    Sendet den Monatsbericht an Teams.
+    NUR VOL mit Web/App Trennung.
+    """
     if not TEAMS_WEBHOOK_URL:
         print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
         return
@@ -433,24 +537,44 @@ def send_monthly_teams_report(title: str, summary: str, data: Dict, current_mont
     else:
         color = "17A2B8"
     
-    # Facts
+    # Web/App Anteil berechnen
+    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
+    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
+    total_pi = web_pi + app_pi
+    web_share = (web_pi / total_pi * 100) if total_pi > 0 else 0
+    app_share = (app_pi / total_pi * 100) if total_pi > 0 else 0
+    
+    # Facts - NUR VOL
     facts = [
         {"name": "📅 Berichtsmonat", "value": current_month},
-        {"name": "📊 Vergleich mit", "value": prev_month}
+        {"name": "📊 Vergleich mit", "value": prev_month},
+        {"name": "📱 Plattform-Verteilung", "value": f"Web: {web_share:.0f}% | App: {app_share:.0f}%"}
     ]
     
-    for key in ["VOL_Web", "VOL_App", "Vienna_Web", "Vienna_App"]:
+    # Gesamt VOL
+    total_pi_val = web_pi + app_pi
+    web_mom = data.get("VOL_Web", {}).get("Page Impressions", {}).get("mom_change")
+    app_mom = data.get("VOL_App", {}).get("Page Impressions", {}).get("mom_change")
+    
+    facts.append({
+        "name": "📊 VOL GESAMT PI",
+        "value": f"{total_pi_val:,}"
+    })
+    
+    # Web und App separat
+    for key in ["VOL_Web", "VOL_App"]:
         if key in data and "Page Impressions" in data[key]:
             m = data[key]["Page Impressions"]
             mom = f" ({m['mom_change']*100:+.1f}%)" if m.get('mom_change') is not None else ""
             facts.append({
-                "name": f"📊 {key.replace('_', ' ')} PI",
+                "name": f"  └─ {key.replace('VOL_', '')} PI",
                 "value": f"{m['current_sum']:,}{mom}"
             })
     
     sections = [
         {
             "activityTitle": title,
+            "activitySubtitle": "📢 Nur VOL.AT (Vienna ausgeschlossen)",
             "facts": facts,
             "markdown": True
         },
@@ -465,7 +589,7 @@ def send_monthly_teams_report(title: str, summary: str, data: Dict, current_mont
             if url:
                 sections.append({
                     "title": f"📊 {chart_name}",
-                    "text": f"[🔍 Klicken zum Vergrößern]({url})",
+                    "text": f"[🔍 **Klicken zum Vergrößern**]({url})",
                     "images": [{"image": url, "title": chart_name}]
                 })
     
@@ -497,10 +621,13 @@ def send_monthly_teams_report(title: str, summary: str, data: Dict, current_mont
 # =============================================================================
 
 def run_monthly_report(target_year: int = None, target_month: int = None):
-    """Hauptfunktion für den Monatsbericht."""
+    """
+    Hauptfunktion für den Monatsbericht.
+    NUR VOL.AT mit Web/App Trennung.
+    """
     print("=" * 70)
-    print("📊 ÖWA MONTHLY REPORT v1.0")
-    print("   Web + App | PI + Visits + UC + HP-PI")
+    print("📊 ÖWA MONTHLY REPORT v2.0")
+    print("   NUR VOL.AT (Web + App getrennt)")
     print("=" * 70)
     
     if not AIRTABLE_API_KEY:
@@ -525,13 +652,14 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
     
     print(f"\n📅 Berichtsmonat: {current_month_str}")
     print(f"📊 Vergleich mit: {prev_month_str}")
+    print(f"📢 Property: NUR VOL.AT (Vienna ausgeschlossen)")
     
-    # Daten laden
-    print("\n📥 Lade Daten aus Airtable...")
+    # Daten laden - NUR VOL
+    print("\n📥 Lade VOL-Daten aus Airtable...")
     current_records = get_measurements_for_month(year, month)
     prev_records = get_measurements_for_month(prev_year, prev_month)
-    print(f"   → {len(current_records)} Records für {current_month_str}")
-    print(f"   → {len(prev_records)} Records für {prev_month_str}")
+    print(f"   → {len(current_records)} Records für {current_month_str} (nur VOL)")
+    print(f"   → {len(prev_records)} Records für {prev_month_str} (nur VOL)")
     
     if not current_records:
         print("❌ Keine Daten für aktuellen Monat gefunden!")
@@ -549,26 +677,51 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
             mom = f"{m['mom_change']*100:+.1f}%" if m.get('mom_change') is not None else "N/A"
             print(f"      {metric}: {m['current_sum']:,} (MoM: {mom})")
     
+    # Web vs. App Anteil
+    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
+    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
+    total_pi = web_pi + app_pi
+    if total_pi > 0:
+        print(f"\n   📱 Plattform-Verteilung (PI):")
+        print(f"      Web: {web_pi:,} ({web_pi/total_pi*100:.1f}%)")
+        print(f"      App: {app_pi:,} ({app_pi/total_pi*100:.1f}%)")
+    
     # Diagramme erstellen
     image_urls = {}
     if PLOTLY_AVAILABLE:
         print("\n📊 Erstelle Diagramme...")
         
         try:
-            # MoM Vergleich
+            # MoM Vergleich (Web + App)
             chart_bytes = create_monthly_comparison_chart(data, "Page Impressions")
             if chart_bytes:
                 url = upload_to_imgur(chart_bytes)
                 if url:
-                    image_urls["MoM Vergleich PI"] = url
-                    print(f"   → MoM-Vergleich hochgeladen")
+                    image_urls["VOL MoM Vergleich PI"] = url
+                    print(f"   → MoM-Vergleich (PI) hochgeladen")
             
-            # Monatstrend
+            # MoM Vergleich Visits
+            visits_chart = create_monthly_comparison_chart(data, "Visits")
+            if visits_chart:
+                url = upload_to_imgur(visits_chart)
+                if url:
+                    image_urls["VOL MoM Vergleich Visits"] = url
+                    print(f"   → MoM-Vergleich (Visits) hochgeladen")
+            
+            # Web vs. App Pie Chart
+            pie_chart = create_web_vs_app_chart(data, "Page Impressions")
+            if pie_chart:
+                url = upload_to_imgur(pie_chart)
+                if url:
+                    image_urls["VOL Web vs. App Anteil"] = url
+                    print(f"   → Web/App-Anteil hochgeladen")
+            
+            # Monatstrend (Web vs. App Linien)
             trend_bytes = create_daily_trend_chart(data, "Page Impressions")
             if trend_bytes:
                 url = upload_to_imgur(trend_bytes)
                 if url:
-                    image_urls["Monatstrend PI"] = url
+                    image_urls["VOL Monatstrend PI (Web vs. App)"] = url
                     print(f"   → Monatstrend hochgeladen")
                     
         except Exception as e:
@@ -581,11 +734,11 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
     
     # Teams Bericht
     print("\n📤 Sende Monatsbericht an Teams...")
-    title = f"📊 ÖWA Monatsbericht - {current_month_str}"
+    title = f"📊 ÖWA Monatsbericht VOL.AT - {current_month_str}"
     send_monthly_teams_report(title, summary, data, current_month_str, prev_month_str, image_urls)
     
     print("\n" + "=" * 70)
-    print("✅ MONTHLY REPORT v1.0 ABGESCHLOSSEN")
+    print("✅ MONTHLY REPORT v2.0 ABGESCHLOSSEN")
     print("=" * 70)
 
 
