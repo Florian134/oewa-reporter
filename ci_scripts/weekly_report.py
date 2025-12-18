@@ -418,29 +418,39 @@ def process_data(records: List[Dict], week_start: date, week_end: date = None) -
                 break
     
     # Berechnungen: 6-Wochen-Durchschnitt und prozentuelle Änderungen
+    # WICHTIG: Für faire Vergleiche bei unterschiedlicher Tagesanzahl
+    # werden TAGESDURCHSCHNITTE verglichen, nicht Summen!
     for key in data:
         for metric in data[key]:
             m = data[key][metric]
             
+            # Tagesdurchschnitt aktuelle Woche
+            m["current_avg"] = m["current_sum"] / max(1, m["current_days"])
+            
             # 6-Wochen-Durchschnitt (ohne aktuelle Woche)
             prev_weeks = m["weekly_values"][1:]  # Index 1-6
-            weeks_with_data = [w for w in prev_weeks if w["value"] > 0]
+            weeks_with_data = [w for w in prev_weeks if w["value"] > 0 and w["days"] > 0]
             
             if weeks_with_data:
+                # KORRIGIERT: Tagesdurchschnitte statt Summen für fairen Vergleich
+                # (wichtig wegen UC 3-Tage-Delay - aktuelle Woche hat oft weniger Tage)
+                daily_avgs = [w["value"] / w["days"] for w in weeks_with_data]
+                m["avg_daily_6_weeks"] = sum(daily_avgs) / len(daily_avgs)
+                
+                # Für Rückwärts-Kompatibilität: auch Wochen-Summen-Durchschnitt behalten
                 m["avg_6_weeks"] = sum(w["value"] for w in weeks_with_data) / len(weeks_with_data)
                 m["weeks_with_data"] = len(weeks_with_data)
                 
-                # Prozentuelle Änderung vs. 6-Wochen-Durchschnitt
-                if m["avg_6_weeks"] > 0:
-                    m["pct_change"] = (m["current_sum"] - m["avg_6_weeks"]) / m["avg_6_weeks"]
+                # Prozentuelle Änderung: TAGESDURCHSCHNITT vs TAGESDURCHSCHNITT
+                # Das ist ein fairer Vergleich auch wenn Wochen unterschiedliche Tage haben!
+                if m["avg_daily_6_weeks"] > 0:
+                    m["pct_change"] = (m["current_avg"] - m["avg_daily_6_weeks"]) / m["avg_daily_6_weeks"]
                 else:
                     m["pct_change"] = None
-            else:
+    else:
                 m["avg_6_weeks"] = 0
+                m["avg_daily_6_weeks"] = 0
                 m["pct_change"] = None
-            
-            # Durchschnitt pro Tag (aktuelle Woche)
-            m["current_avg"] = m["current_sum"] / max(1, m["current_days"])
     
     return data
 
@@ -725,8 +735,11 @@ def run_weekly_report():
         for metric in data[key]:
             m = data[key][metric]
             pct = f"{m['pct_change']*100:+.1f}%" if m.get('pct_change') is not None else "N/A"
-            avg = m.get('avg_6_weeks', 0)
-            print(f"      {metric}: {m['current_sum']:,} (vs. 6-Wochen-Ø {avg:,.0f}: {pct})")
+            days = m.get('current_days', 0)
+            daily_avg = m.get('current_avg', 0)
+            prev_daily_avg = m.get('avg_daily_6_weeks', 0)
+            print(f"      {metric}: {m['current_sum']:,} ({days} Tage, Ø {daily_avg:,.0f}/Tag)")
+            print(f"               vs. 6-Wochen-Ø {prev_daily_avg:,.0f}/Tag → {pct}")
     
     # Diagramme erstellen und zu Imgur hochladen
     image_urls = {}
