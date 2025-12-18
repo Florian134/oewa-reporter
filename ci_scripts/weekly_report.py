@@ -573,14 +573,27 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
         {"name": "📊 Vergleich", "value": f"vs. Ø der letzten {COMPARISON_WEEKS} Wochen"}
     ]
     
-    for key in ["VOL_Web", "VOL_App"]:
-        if key in data:
-            for metric in ["Page Impressions", "Visits"]:
-                if metric in data[key]:
-                    m = data[key][metric]
+    # VOL Web - alle Metriken inkl. Homepage PI
+    if "VOL_Web" in data:
+        for metric in ["Page Impressions", "Visits", "Homepage PI", "Unique Clients"]:
+            if metric in data["VOL_Web"]:
+                m = data["VOL_Web"][metric]
+                if m.get("current_sum", 0) > 0:  # Nur anzeigen wenn Daten vorhanden
                     pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
                     facts.append({
-                        "name": f"📊 {key.replace('_', ' ')} {metric}",
+                        "name": f"📊 VOL Web {metric}",
+                        "value": f"{m['current_sum']:,}{pct}"
+                    })
+    
+    # VOL App - OHNE Homepage PI (existiert nicht für Apps)
+    if "VOL_App" in data:
+        for metric in ["Page Impressions", "Visits", "Unique Clients"]:
+            if metric in data["VOL_App"]:
+                m = data["VOL_App"][metric]
+                if m.get("current_sum", 0) > 0:  # Nur anzeigen wenn Daten vorhanden
+                    pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
+                    facts.append({
+                        "name": f"📊 VOL App {metric}",
                         "value": f"{m['current_sum']:,}{pct}"
                     })
     
