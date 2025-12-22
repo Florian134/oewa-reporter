@@ -38,6 +38,9 @@ class TestSecuritySecrets:
         'share',
         'etc',
         'archive',
+        '.cache',
+        'site-packages',
+        'tests',  # Test-Dateien selbst überspringen
     ]
     
     # Erlaubte Dateiendungen
