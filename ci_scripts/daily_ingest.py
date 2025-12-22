@@ -670,8 +670,13 @@ def main():
     print("💾 PHASE 3: Airtable-Speicherung")
     print("=" * 70)
     
-    print(f"\n🔍 Prüfe existierende Daten für {target_date}...")
+    # WICHTIG: Prüfe existierende Daten für BEIDE Zieldaten (Standard + UC)
+    print(f"\n🔍 Prüfe existierende Daten für {target_date} (Standard)...")
     existing_keys = check_existing_records(target_date)
+    
+    print(f"🔍 Prüfe existierende Daten für {uc_target_date} (UC)...")
+    existing_keys_uc = check_existing_records(uc_target_date)
+    existing_keys = existing_keys.union(existing_keys_uc)  # Kombiniere beide Sets
     
     if records_to_create:
         print(f"\n💾 Speichere {len(records_to_create)} Datensätze in Airtable...")

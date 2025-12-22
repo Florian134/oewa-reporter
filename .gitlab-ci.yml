@@ -11,6 +11,7 @@
 # - test_notifications: Test aller Benachrichtigungen
 
 stages:
+  - test
   - run
   - deploy
 
@@ -21,6 +22,52 @@ variables:
 cache:
   paths:
     - .cache/pip/
+
+# =============================================================================
+# TEST SUITE - Automatische Tests bei jedem Push
+# =============================================================================
+test_security:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "🔒 Security Tests"
+    - pip install --upgrade pip
+    - pip install pytest requests
+    - python -m pytest tests/test_security.py::TestSecuritySecrets::test_no_secrets_in_code tests/test_security.py::TestSecuritySecrets::test_gitignore_covers_sensitive_files -v --tb=short
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: true  # Warnung statt Blockierung bis vollständig konfiguriert
+
+test_data_integrity:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "🔍 Data Integrity Tests"
+    - pip install --upgrade pip
+    - pip install pytest requests
+    - python -m pytest tests/test_data_integrity.py -v --tb=short -m "critical"
+  rules:
+    - if: $JOB_TYPE == "test_data"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $TEST_TYPE == "data"
+  allow_failure: true
+
+test_full_suite:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "🧪 Full Test Suite"
+    - pip install --upgrade pip
+    - pip install pytest requests
+    - python ci_scripts/run_tests.py all
+  rules:
+    - if: $JOB_TYPE == "test_all"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $TEST_TYPE == "all"
+  artifacts:
+    when: always
+    reports:
+      junit: test-results.xml
+  allow_failure: true
 
 # =============================================================================
 # DAILY INGESTION v2.0 - Web + App, alle Metriken, integriertes Alerting
