@@ -124,6 +124,10 @@ public/charts/*.png
 debug_*.py
 cleanup_*.py
 check_*.py
+run_full_test.py
+infonline_api_test/
+
+# Lokale Test-Dateien (außer offizielle Tests)
 test_*.py
 !tests/test_*.py
 !ci_scripts/test_*.py
