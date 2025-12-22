@@ -377,8 +377,35 @@ brands = df_filtered["brand"].dropna().unique().tolist()
 selected_brands = st.sidebar.multiselect("Brands", brands, default=brands)
 df_filtered = df_filtered[df_filtered["brand"].isin(selected_brands)]
 
-# Sidebar platform filter (NEU: Web/App)
-platforms = df_filtered["plattform"].dropna().unique().tolist()
+# Sidebar platform filter (NEU: Web/iOS/Android mit App-Aggregation)
+st.sidebar.subheader("📱 Plattform-Filter")
+
+# Verfügbare Plattformen ermitteln
+raw_platforms = df_filtered["plattform"].dropna().unique().tolist()
+
+# Prüfen ob iOS/Android-Daten vorhanden sind
+has_ios = "iOS" in raw_platforms
+has_android = "Android" in raw_platforms
+has_app_platforms = has_ios or has_android
+
+if has_app_platforms:
+    # App-Aggregationsoption anbieten
+    aggregate_app = st.sidebar.checkbox(
+        "📱 iOS + Android als 'App' zusammenfassen",
+        value=False,
+        help="Aggregiert iOS und Android Daten zu einer kombinierten 'App'-Ansicht"
+    )
+    
+    if aggregate_app:
+        # Temporär iOS/Android zu App aggregieren für Anzeige
+        df_filtered = df_filtered.copy()
+        df_filtered.loc[df_filtered["plattform"].isin(["iOS", "Android"]), "plattform"] = "App"
+    
+    # Aktualisierte Plattform-Liste nach evtl. Aggregation
+    platforms = df_filtered["plattform"].dropna().unique().tolist()
+else:
+    platforms = raw_platforms
+
 if len(platforms) > 1:
     selected_platforms = st.sidebar.multiselect("Plattform", platforms, default=platforms)
     df_filtered = df_filtered[df_filtered["plattform"].isin(selected_platforms)]
@@ -799,13 +826,30 @@ with tab2:
 # TAB 3: ZEITREIHEN
 # -----------------------------------------------------------------------------
 with tab3:
-    st.subheader("📈 Zeitreihen-Analyse nach Property")
+    # Gruppierungsauswahl: Brand oder Plattform
+    col_group, col_agg = st.columns([1, 1])
+    
+    with col_group:
+        grouping_mode = st.radio(
+            "📊 Gruppierung",
+            ["🏢 Nach Brand (VOL/Vienna)", "📱 Nach Plattform (iOS/Android/Web)"],
+            index=0,
+            horizontal=True,
+            help="Wähle ob die Daten nach Brand oder nach Plattform gruppiert werden sollen"
+        )
+    
+    is_platform_view = "Plattform" in grouping_mode
+    
+    # Dynamischer Titel basierend auf Gruppierung
+    if is_platform_view:
+        st.subheader("📈 Zeitreihen-Analyse nach Plattform")
+    else:
+        st.subheader("📈 Zeitreihen-Analyse nach Property")
     
     # Aggregationsauswahl: Tag oder Monat
-    col_agg1, col_agg2 = st.columns([1, 3])
-    with col_agg1:
+    with col_agg:
         aggregation_mode = st.radio(
-            "Aggregation",
+            "⏱️ Aggregation",
             ["📅 Tagesansicht", "📆 Monatsansicht"],
             index=0,
             horizontal=True
@@ -813,10 +857,18 @@ with tab3:
     
     is_monthly = aggregation_mode == "📆 Monatsansicht"
     
-    # Farben für Properties
+    # Farben für Properties (Brands)
     property_colors = {
         "VOL": {"current": "#3B82F6", "comparison": "#93C5FD"},      # Blau
         "Vienna": {"current": "#8B5CF6", "comparison": "#C4B5FD"}    # Lila
+    }
+    
+    # NEU: Farben für Plattformen
+    platform_colors = {
+        "iOS": {"current": "#10B981", "comparison": "#6EE7B7"},       # Grün
+        "Android": {"current": "#F59E0B", "comparison": "#FCD34D"},   # Orange
+        "Web": {"current": "#3B82F6", "comparison": "#93C5FD"},       # Blau
+        "App": {"current": "#8B5CF6", "comparison": "#C4B5FD"}        # Lila (für aggregierte App)
     }
     
     if is_monthly:
@@ -827,6 +879,17 @@ with tab3:
         
         # Hinweis zu YoY
         st.caption("ℹ️ *Year-over-Year (YoY) Vergleiche werden verfügbar sein, sobald Daten für mindestens 12 Monate vorliegen (voraussichtlich ab Juni 2026).*")
+        
+        # Gruppierungsspalte bestimmen
+        group_col = "plattform" if is_platform_view else "brand"
+        colors_map = platform_colors if is_platform_view else property_colors
+        group_label = "Plattform" if is_platform_view else "Brand"
+        
+        # Verfügbare Gruppen ermitteln
+        if is_platform_view:
+            available_groups = [p for p in ["iOS", "Android", "Web", "App"] if p in df_filtered[group_col].unique()]
+        else:
+            available_groups = ["VOL", "Vienna"]
         
         # Alle verfügbaren Daten nach Monat gruppieren
         monthly_all = df[
@@ -842,8 +905,8 @@ with tab3:
             monthly_all["monat_start"] = monthly_all["monat"].dt.to_timestamp()
             monthly_all["monat_label"] = monthly_all["datum"].dt.strftime("%b %Y")
             
-            # Pro Monat, Metrik und Brand aggregieren
-            monthly_agg = monthly_all.groupby(["monat_start", "monat_label", "metrik", "brand"])["wert"].sum().reset_index()
+            # Pro Monat, Metrik und Gruppierung aggregieren
+            monthly_agg = monthly_all.groupby(["monat_start", "monat_label", "metrik", group_col])["wert"].sum().reset_index()
             monthly_agg = monthly_agg.sort_values("monat_start")
             
             # Für jede Metrik ein Diagramm
@@ -856,55 +919,55 @@ with tab3:
                 
                 fig = go.Figure()
                 
-                for brand in ["VOL", "Vienna"]:
-                    brand_data = metric_data[metric_data["brand"] == brand].copy()
-                    colors = property_colors.get(brand, {"current": "#666", "comparison": "#999"})
+                for group in available_groups:
+                    group_data = metric_data[metric_data[group_col] == group].copy()
+                    colors = colors_map.get(group, {"current": "#666", "comparison": "#999"})
                     
-                    if not brand_data.empty:
-                        brand_data = brand_data.sort_values("monat_start")
+                    if not group_data.empty:
+                        group_data = group_data.sort_values("monat_start")
                         
                         # Berechne MoM-Änderung
-                        brand_data["mom_change"] = brand_data["wert"].pct_change() * 100
+                        group_data["mom_change"] = group_data["wert"].pct_change() * 100
                         
                         # Hole den Vormonatsnamen für den Tooltip
-                        brand_data["vormonat"] = brand_data["monat_label"].shift(1)
+                        group_data["vormonat"] = group_data["monat_label"].shift(1)
                         
                         fig.add_trace(go.Scatter(
-                            x=brand_data["monat_start"],
-                            y=brand_data["wert"],
+                            x=group_data["monat_start"],
+                            y=group_data["wert"],
                             mode="lines+markers",
-                            name=f"{brand}",
+                            name=f"{group}",
                             line=dict(color=colors["current"], width=3),
                             marker=dict(size=10),
-                            text=brand_data["wert"].apply(lambda x: f"{x:,.0f}".replace(",", ".")),
-                            hovertemplate=f"<b>{brand}</b><br>" +
+                            text=group_data["wert"].apply(lambda x: f"{x:,.0f}".replace(",", ".")),
+                            hovertemplate=f"<b>{group}</b><br>" +
                                           "%{x|%B %Y}<br>" +
                                           "Wert: %{text}<br>" +
                                           "<extra></extra>"
                         ))
                         
                         # MoM-Balken mit klarer Beschriftung (Veränderung zum Vormonat)
-                        if len(brand_data) > 1:
-                            mom_data = brand_data[brand_data["mom_change"].notna()].copy()
+                        if len(group_data) > 1:
+                            mom_data = group_data[group_data["mom_change"].notna()].copy()
                             if not mom_data.empty:
                                 bar_colors = ["#10B981" if x >= 0 else "#EF4444" for x in mom_data["mom_change"]]
                                 fig.add_trace(go.Bar(
                                     x=mom_data["monat_start"],
                                     y=mom_data["mom_change"],
-                                    name=f"{brand} Δ Vormonat",
+                                    name=f"{group} Δ Vormonat",
                                     marker_color=bar_colors,
                                     opacity=0.3,
                                     yaxis="y2",
                                     showlegend=True,
                                     text=mom_data["mom_change"].apply(lambda x: f"{x:+.1f}%"),
-                                    hovertemplate=f"<b>{brand}</b><br>" +
+                                    hovertemplate=f"<b>{group}</b><br>" +
                                                   "%{x|%B %Y}<br>" +
                                                   "Veränderung vs. Vormonat: %{text}<br>" +
                                                   "<extra></extra>"
                                 ))
                 
                 fig.update_layout(
-                    title=f"{metrik} - Monatstrend",
+                    title=f"{metrik} - Monatstrend nach {group_label}",
                     yaxis=dict(
                         title="Wert",
                         tickformat=",",
@@ -940,15 +1003,15 @@ with tab3:
             
             # MoM-Tabelle (formatiert!)
             st.markdown("### 📊 Monatsvergleich")
-            st.caption("Werte = Monatssumme | Δ = Veränderung zum Vormonat in %")
+            st.caption(f"Werte = Monatssumme | Δ = Veränderung zum Vormonat in % | Gruppiert nach: {group_label}")
             
-            # Bessere Tabelle: Für jede Metrik/Brand eine MoM-Berechnung
+            # Bessere Tabelle: Für jede Metrik/Gruppe eine MoM-Berechnung
             table_data = []
             
             for _, row in monthly_agg.iterrows():
                 monat = row["monat_start"]
                 label = row["monat_label"]
-                brand = row["brand"]
+                group = row[group_col]
                 metrik = row["metrik"]
                 wert = row["wert"]
                 
@@ -956,7 +1019,7 @@ with tab3:
                 vormonat = monat - pd.DateOffset(months=1)
                 prev_row = monthly_agg[
                     (monthly_agg["monat_start"] == vormonat) &
-                    (monthly_agg["brand"] == brand) &
+                    (monthly_agg[group_col] == group) &
                     (monthly_agg["metrik"] == metrik)
                 ]
                 
@@ -971,7 +1034,7 @@ with tab3:
                 
                 table_data.append({
                     "Monat": label,
-                    "Brand": brand,
+                    group_label: group,
                     "Metrik": metrik,
                     "Wert": f"{wert:,.0f}".replace(",", "."),
                     "Δ Vormonat": f"{mom_pct:+.1f}%" if mom_pct is not None else "—"
@@ -983,23 +1046,34 @@ with tab3:
             if not df_table.empty:
                 # Sortiere absteigend nach Datum
                 df_table["_sort"] = pd.to_datetime(df_table["Monat"], format="%b %Y")
-                df_table = df_table.sort_values(["_sort", "Brand", "Metrik"], ascending=[False, True, True])
+                df_table = df_table.sort_values(["_sort", group_label, "Metrik"], ascending=[False, True, True])
                 df_table = df_table.drop("_sort", axis=1)
                 
                 st.dataframe(df_table.head(48), use_container_width=True, hide_index=True)
     
     else:
         # =====================================================================
-        # TAGESANSICHT (bestehender Code)
+        # TAGESANSICHT
         # =====================================================================
         # Vergleichsinfo anzeigen
         if has_comparison:
             st.info(f"📅 Vergleich: **Durchgezogen** = Aktuell ({start_date.strftime('%d.%m.')}-{end_date.strftime('%d.%m.')}) | **Gestrichelt** = Vorperiode ({prev_start.strftime('%d.%m.')}-{prev_end.strftime('%d.%m.')})")
         
-        # Daten pro Tag UND Brand aggregieren - Aktueller Zeitraum
+        # Gruppierungsspalte bestimmen
+        group_col = "plattform" if is_platform_view else "brand"
+        colors_map = platform_colors if is_platform_view else property_colors
+        group_label = "Plattform" if is_platform_view else "Property"
+        
+        # Verfügbare Gruppen ermitteln
+        if is_platform_view:
+            available_groups = [p for p in ["iOS", "Android", "Web", "App"] if p in df_filtered[group_col].unique()]
+        else:
+            available_groups = ["VOL", "Vienna"]
+        
+        # Daten pro Tag aggregieren - Aktueller Zeitraum
         daily = df_filtered.copy()
         daily["datum_tag"] = daily["datum"].dt.date
-        daily = daily.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
+        daily = daily.groupby(["datum_tag", "metrik", group_col])["wert"].sum().reset_index()
         daily["datum_tag"] = pd.to_datetime(daily["datum_tag"])
         daily["periode"] = "Aktuell"
         
@@ -1007,7 +1081,7 @@ with tab3:
         if has_comparison:
             daily_prev = df_prev.copy()
             daily_prev["datum_tag"] = daily_prev["datum"].dt.date
-            daily_prev = daily_prev.groupby(["datum_tag", "metrik", "brand"])["wert"].sum().reset_index()
+            daily_prev = daily_prev.groupby(["datum_tag", "metrik", group_col])["wert"].sum().reset_index()
             daily_prev["datum_tag"] = pd.to_datetime(daily_prev["datum_tag"])
             daily_prev["periode"] = "Vergleich"
             
@@ -1028,47 +1102,47 @@ with tab3:
                 
                 fig = go.Figure()
                 
-                # Für jede Property (Brand) eine eigene Linie
-                for brand in ["VOL", "Vienna"]:
-                    brand_data = metric_data[metric_data["brand"] == brand].copy()
-                    colors = property_colors.get(brand, {"current": "#666", "comparison": "#999"})
+                # Für jede Gruppe (Brand oder Plattform) eine eigene Linie
+                for group in available_groups:
+                    group_data = metric_data[metric_data[group_col] == group].copy()
+                    colors = colors_map.get(group, {"current": "#666", "comparison": "#999"})
                     
-                    if not brand_data.empty:
-                        brand_data = brand_data.sort_values("datum_tag")
+                    if not group_data.empty:
+                        group_data = group_data.sort_values("datum_tag")
                         
                         # Aktueller Zeitraum - Kräftige durchgezogene Linie
                         fig.add_trace(go.Scatter(
-                            x=brand_data["datum_tag"],
-                            y=brand_data["wert"],
+                            x=group_data["datum_tag"],
+                            y=group_data["wert"],
                             mode="lines+markers",
-                            name=f"{brand} Aktuell",
+                            name=f"{group} Aktuell",
                             line=dict(color=colors["current"], width=2),
                             marker=dict(size=6),
-                            legendgroup=f"{brand}_current"
+                            legendgroup=f"{group}_current"
                         ))
                     
                     # Vergleichszeitraum hinzufügen wenn verfügbar
                     if has_comparison:
                         metric_data_prev = daily_prev[daily_prev["metrik"] == metrik]
-                        brand_data_prev = metric_data_prev[metric_data_prev["brand"] == brand].copy()
+                        group_data_prev = metric_data_prev[metric_data_prev[group_col] == group].copy()
                         
-                        if not brand_data_prev.empty:
-                            brand_data_prev = brand_data_prev.sort_values("datum_tag_shifted")
+                        if not group_data_prev.empty:
+                            group_data_prev = group_data_prev.sort_values("datum_tag_shifted")
                             
                             # Vergleichszeitraum - Gestrichelte hellere Linie
                             fig.add_trace(go.Scatter(
-                                x=brand_data_prev["datum_tag_shifted"],
-                                y=brand_data_prev["wert"],
+                                x=group_data_prev["datum_tag_shifted"],
+                                y=group_data_prev["wert"],
                                 mode="lines+markers",
-                                name=f"{brand} Vergleich",
+                                name=f"{group} Vergleich",
                                 line=dict(color=colors["comparison"], width=2, dash="dash"),
                                 marker=dict(size=4, symbol="diamond"),
-                                legendgroup=f"{brand}_comparison",
+                                legendgroup=f"{group}_comparison",
                                 opacity=0.8
                             ))
                 
                 fig.update_layout(
-                    title=f"{metrik} - Trend nach Property" + (" (mit Vergleichszeitraum)" if has_comparison else ""),
+                    title=f"{metrik} - Trend nach {group_label}" + (" (mit Vergleichszeitraum)" if has_comparison else ""),
                     yaxis_tickformat=",",
                     xaxis=dict(
                         tickformat="%d.%m.",
@@ -1091,11 +1165,23 @@ with tab3:
     # Erkenntnisse-Box
     st.markdown("---")
     st.markdown("### 📊 Legende")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("🔵 **VOL.AT** - Vorarlberg Online")
-    with col2:
-        st.markdown("🟣 **VIENNA.AT** - Wien Online")
+    
+    if is_platform_view:
+        # Plattform-Legende
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("🟢 **iOS** - Apple App Store")
+        with col2:
+            st.markdown("🟠 **Android** - Google Play Store")
+        with col3:
+            st.markdown("🔵 **Web** - Browser-Zugriffe")
+    else:
+        # Brand-Legende
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("🔵 **VOL.AT** - Vorarlberg Online")
+        with col2:
+            st.markdown("🟣 **VIENNA.AT** - Wien Online")
 
 # =============================================================================
 # FOOTER
