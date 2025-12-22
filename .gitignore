@@ -112,3 +112,19 @@ temp/
 *.tar
 docker-compose.override.yml
 
+# ÖWA-spezifisch - NICHT committen
+backfill_log.txt
+*_log.txt
+SESSION_SUMMARY_*.md
+AIRTABLE_SETUP_PROMPT.md
+API-testing.py
+public/charts/*.png
+
+# Alte Test-Skripte
+debug_*.py
+cleanup_*.py
+check_*.py
+test_*.py
+!tests/test_*.py
+!ci_scripts/test_*.py
+
