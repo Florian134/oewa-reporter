@@ -278,27 +278,38 @@ with st.sidebar.expander("ℹ️ Datenverfügbarkeit"):
 st.sidebar.subheader("📊 Messzeitraum")
 
 # Initialize session state for date range (using widget keys)
+# WICHTIG: Verwende overall_min_date um auch Monatsdaten zu berücksichtigen!
 if "start_input" not in st.session_state:
-    st.session_state.start_input = max(min(date.today(), data_max_date) - timedelta(days=30), data_min_date)
+    st.session_state.start_input = max(min(date.today(), overall_max_date) - timedelta(days=30), overall_min_date)
 if "end_input" not in st.session_state:
-    st.session_state.end_input = min(date.today(), data_max_date)
+    st.session_state.end_input = min(date.today(), overall_max_date)
 
 # Quick select buttons - directly modify widget keys
 col_btn1, col_btn2 = st.sidebar.columns(2)
 if col_btn1.button("Letzte 7 Tage"):
-    st.session_state.start_input = max(date.today() - timedelta(days=7), data_min_date)
+    st.session_state.start_input = max(date.today() - timedelta(days=7), data_min_date)  # Tagesdaten
     st.session_state.end_input = min(date.today(), data_max_date)
     st.rerun()
 
 if col_btn2.button("Letzte 30 Tage"):
-    st.session_state.start_input = max(date.today() - timedelta(days=30), data_min_date)
+    st.session_state.start_input = max(date.today() - timedelta(days=30), data_min_date)  # Tagesdaten
     st.session_state.end_input = min(date.today(), data_max_date)
     st.rerun()
 
 # Date inputs with widget keys
+# WICHTIG: Erlaube Zugriff auf ALLE Daten (Tages- UND Monatsdaten)
 col1, col2 = st.sidebar.columns(2)
-start_date = col1.date_input("Von", min_value=data_min_date, max_value=data_max_date, key="start_input")
-end_date = col2.date_input("Bis", min_value=data_min_date, max_value=data_max_date, key="end_input")
+start_date = col1.date_input("Von", min_value=overall_min_date, max_value=overall_max_date, key="start_input")
+end_date = col2.date_input("Bis", min_value=overall_min_date, max_value=overall_max_date, key="end_input")
+
+# Prüfen ob gewählter Zeitraum nur Monatsdaten enthält (vor 180-Tage-Grenze)
+uses_monthly_data_only = start_date < DAILY_DATA_CUTOFF and end_date < DAILY_DATA_CUTOFF
+uses_mixed_data = start_date < DAILY_DATA_CUTOFF and end_date >= DAILY_DATA_CUTOFF
+
+if uses_monthly_data_only:
+    st.sidebar.warning("📆 **Nur Monatsdaten verfügbar** für diesen Zeitraum. Bitte verwende die Monatsansicht im Zeitreihen-Tab.")
+elif uses_mixed_data:
+    st.sidebar.info(f"📆 **Gemischter Zeitraum:** Tagesdaten ab {DAILY_DATA_CUTOFF.strftime('%d.%m.%Y')}, davor nur Monatsdaten.")
 
 # =============================================================================
 # COMPARISON PERIOD SELECTION (wie Google Analytics)
@@ -315,18 +326,28 @@ comparison_mode = st.sidebar.radio(
     help="Vorperiode: Gleich langer Zeitraum direkt vor der Auswahl"
 )
 
+# WICHTIG: Verwende overall_min_date für Vergleichszeiträume (inkl. Monatsdaten)
+comparison_uses_monthly_only = False
+
 if comparison_mode == "Vorperiode (automatisch)":
     # Automatische Vorperiode = gleich langer Zeitraum direkt davor
     prev_end = start_date - timedelta(days=1)
     prev_start = prev_end - timedelta(days=selected_days - 1)
     
-    # Check if comparison period is within available data
-    if prev_start >= data_min_date:
+    # Check if comparison period is within available data (inkl. Monatsdaten!)
+    if prev_start >= overall_min_date:
         comparison_fully_available = True
-        st.sidebar.success(f"✅ Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
-    elif prev_end >= data_min_date:
+        # Prüfen ob Vergleichszeitraum nur Monatsdaten enthält
+        if prev_end < DAILY_DATA_CUTOFF:
+            comparison_uses_monthly_only = True
+            st.sidebar.info(f"📆 Vergleich (Monatsdaten): {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
+        elif prev_start < DAILY_DATA_CUTOFF:
+            st.sidebar.warning(f"⚠️ Gemischter Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}\n(Teilweise nur Monatsdaten)")
+        else:
+            st.sidebar.success(f"✅ Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
+    elif prev_end >= overall_min_date:
         comparison_fully_available = False
-        actual_prev_start = max(prev_start, data_min_date)
+        actual_prev_start = max(prev_start, overall_min_date)
         actual_days = (prev_end - actual_prev_start).days + 1
         st.sidebar.warning(f"⚠️ Nur {actual_days}/{selected_days} Tage verfügbar:\n{actual_prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}")
         prev_start = actual_prev_start
@@ -343,18 +364,18 @@ elif comparison_mode == "Benutzerdefiniert":
     # Spätestes mögliches Startdatum für Vergleich (damit Vergleichszeitraum nicht in Messzeitraum ragt)
     latest_comparison_start = start_date - timedelta(days=selected_days)
     
-    if latest_comparison_start >= data_min_date:
+    if latest_comparison_start >= overall_min_date:
         # Info über den Mechanismus anzeigen
         st.sidebar.info(f"ℹ️ Wähle das Startdatum. Enddatum wird automatisch berechnet (+{selected_days} Tage)")
         
         # Default: gleicher Zeitraum wie "Vorperiode automatisch"
-        default_cmp_start = max(start_date - timedelta(days=selected_days), data_min_date)
+        default_cmp_start = max(start_date - timedelta(days=selected_days), overall_min_date)
         
-        # NUR ein Datumsfeld für den Start
+        # NUR ein Datumsfeld für den Start - erlaube Zugriff auf Monatsdaten
         prev_start = st.sidebar.date_input(
             "Vergleichszeitraum ab", 
             value=default_cmp_start,
-            min_value=data_min_date, 
+            min_value=overall_min_date, 
             max_value=latest_comparison_start,
             key="cmp_start",
             help=f"Das Enddatum wird automatisch auf {selected_days} Tage nach dem Startdatum gesetzt"
@@ -364,13 +385,20 @@ elif comparison_mode == "Benutzerdefiniert":
         prev_end = prev_start + timedelta(days=selected_days - 1)
         
         # Prüfen ob genug Daten vorhanden sind
-        if prev_end <= data_max_date:
+        if prev_end <= overall_max_date:
             comparison_fully_available = True
-            st.sidebar.success(f"✅ Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')} ({selected_days} Tage)")
+            # Prüfen ob Vergleichszeitraum nur Monatsdaten enthält
+            if prev_end < DAILY_DATA_CUTOFF:
+                comparison_uses_monthly_only = True
+                st.sidebar.info(f"📆 Vergleich (Monatsdaten): {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')} ({selected_days} Tage)")
+            elif prev_start < DAILY_DATA_CUTOFF:
+                st.sidebar.warning(f"⚠️ Gemischter Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')}\n(Teilweise nur Monatsdaten)")
+            else:
+                st.sidebar.success(f"✅ Vergleich: {prev_start.strftime('%d.%m.')} - {prev_end.strftime('%d.%m.%Y')} ({selected_days} Tage)")
         else:
             # Falls Enddatum außerhalb der verfügbaren Daten liegt
             comparison_fully_available = False
-            actual_end = min(prev_end, data_max_date)
+            actual_end = min(prev_end, overall_max_date)
             actual_days = (actual_end - prev_start).days + 1
             st.sidebar.warning(f"⚠️ Nur {actual_days}/{selected_days} Tage verfügbar:\n{prev_start.strftime('%d.%m.')} - {actual_end.strftime('%d.%m.%Y')}")
             prev_end = actual_end
@@ -386,18 +414,47 @@ else:
     prev_end = None
     comparison_fully_available = False
 
-if df.empty:
+# =============================================================================
+# DATENQUELLE BESTIMMEN (Tagesdaten vs. Monatsdaten)
+# =============================================================================
+# Wenn der Zeitraum vor der 180-Tage-Grenze liegt, müssen Monatsdaten verwendet werden
+main_period_uses_monthly = uses_monthly_data_only
+
+if df.empty and df_monthly_raw.empty:
     st.warning("Keine Daten verfügbar. Bitte prüfe die Airtable-Konfiguration.")
     st.stop()
 
-# Filter by date
-df_filtered = df[
-    (df["datum"].dt.date >= start_date) & 
-    (df["datum"].dt.date <= end_date)
-]
+# Filter by date - wähle passende Datenquelle
+if main_period_uses_monthly:
+    # Nur Monatsdaten verfügbar für diesen Zeitraum
+    df_filtered = df_monthly_raw[
+        (df_monthly_raw["datum"].dt.date >= start_date) & 
+        (df_monthly_raw["datum"].dt.date <= end_date)
+    ].copy()
+    
+    if df_filtered.empty:
+        st.warning(f"""
+        ⚠️ **Keine Daten für den gewählten Zeitraum ({start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')})**
+        
+        Für Zeiträume vor dem {DAILY_DATA_CUTOFF.strftime('%d.%m.%Y')} sind nur **Monatsdaten** verfügbar.
+        Die Monatsdaten haben das Datum am letzten Tag des jeweiligen Monats (z.B. 31.01.2024 für Januar 2024).
+        
+        **Tipp:** Wähle einen kompletten Monat (z.B. 01.01.2024 - 31.01.2024) oder nutze die Schnellauswahl.
+        """)
+else:
+    # Tagesdaten verwenden
+    df_filtered = df[
+        (df["datum"].dt.date >= start_date) & 
+        (df["datum"].dt.date <= end_date)
+    ].copy()
 
 # Sidebar brand filter
-brands = df_filtered["brand"].dropna().unique().tolist()
+# Ermittle verfügbare Brands aus der passenden Datenquelle
+if df_filtered.empty and not main_period_uses_monthly:
+    # Fallback: Zeige alle Brands aus den Tagesdaten
+    brands = df["brand"].dropna().unique().tolist()
+else:
+    brands = df_filtered["brand"].dropna().unique().tolist()
 selected_brands = st.sidebar.multiselect("Brands", brands, default=brands)
 df_filtered = df_filtered[df_filtered["brand"].isin(selected_brands)]
 
@@ -411,6 +468,9 @@ raw_platforms = df_filtered["plattform"].dropna().unique().tolist()
 has_ios = "iOS" in raw_platforms
 has_android = "Android" in raw_platforms
 has_app_platforms = has_ios or has_android
+
+# Default-Wert für aggregate_app (wird überschrieben wenn iOS/Android vorhanden)
+aggregate_app = False
 
 if has_app_platforms:
     # App-Aggregationsoption anbieten
@@ -453,18 +513,44 @@ if st.sidebar.button("🚪 Abmelden", use_container_width=True):
 # VERGLEICHSDATEN VORBEREITEN (für alle Diagramme)
 # =============================================================================
 # df_prev wird für KPIs UND Diagramme verwendet
+# WICHTIG: Nutze Monatsdaten wenn Vergleichszeitraum vor 180-Tage-Grenze liegt
 if prev_start is not None and prev_end is not None:
-    df_prev = df[
+    # Zuerst versuchen: Tagesdaten
+    df_prev_daily = df[
         (df["datum"].dt.date >= prev_start) & 
         (df["datum"].dt.date <= prev_end) &
         (df["brand"].isin(selected_brands)) &
         (df["metrik"].isin(selected_metrics)) &
         (df["plattform"].isin(selected_platforms))
     ]
+    
+    # Falls keine Tagesdaten und Zeitraum vor 180-Tage-Grenze: Monatsdaten verwenden
+    if df_prev_daily.empty and comparison_uses_monthly_only and not df_monthly_raw.empty:
+        # Filtere Monatsdaten für Vergleichszeitraum
+        # Monatsdaten haben das Datum am Ende des Monats (z.B. 31.01.2024 = Januar 2024)
+        df_prev_monthly = df_monthly_raw[
+            (df_monthly_raw["datum"].dt.date >= prev_start) & 
+            (df_monthly_raw["datum"].dt.date <= prev_end) &
+            (df_monthly_raw["brand"].isin(selected_brands)) &
+            (df_monthly_raw["metrik"].isin(selected_metrics))
+        ]
+        # Plattform-Filter für Monatsdaten (App = iOS + Android)
+        if has_app_platforms and aggregate_app:
+            df_prev_monthly = df_prev_monthly.copy()
+            df_prev_monthly.loc[df_prev_monthly["plattform"].isin(["iOS", "Android"]), "plattform"] = "App"
+        df_prev_monthly = df_prev_monthly[df_prev_monthly["plattform"].isin(selected_platforms)]
+        
+        df_prev = df_prev_monthly
+        comparison_is_monthly = True
+    else:
+        df_prev = df_prev_daily
+        comparison_is_monthly = False
+    
     has_comparison = len(df_prev) > 0
 else:
     df_prev = pd.DataFrame()
     has_comparison = False
+    comparison_is_monthly = False
 
 # Farben für Vergleich
 colors_current = {"VOL": "#3B82F6", "Vienna": "#8B5CF6"}
@@ -491,17 +577,9 @@ hp_pi_avg = hp_pi_total / days
 col1, col2, col3, col4 = st.columns(4)
 
 # Calculate period-over-period change using the comparison period from sidebar
-if prev_start is not None and prev_end is not None:
-    # Gleiche Filter wie Hauptauswahl (brands, metrics UND platforms)
-    df_prev = df[
-        (df["datum"].dt.date >= prev_start) & 
-        (df["datum"].dt.date <= prev_end) &
-        (df["brand"].isin(selected_brands)) &
-        (df["metrik"].isin(selected_metrics)) &
-        (df["plattform"].isin(selected_platforms))
-    ]
-    
-    # Berechne Vergleichsdaten
+# HINWEIS: df_prev wurde bereits oben vorbereitet (inkl. Monatsdaten-Fallback)
+if prev_start is not None and prev_end is not None and has_comparison:
+    # Berechne Vergleichsdaten (df_prev wurde bereits oben definiert!)
     prev_days_with_data = df_prev["datum"].dt.date.nunique()
     comparison_days = (prev_end - prev_start).days + 1
     
@@ -514,8 +592,11 @@ if prev_start is not None and prev_end is not None:
     else:
         period_label = "vs. Vorperiode"
     
-    # Zusätzlicher Hinweis bei unvollständigen Daten
-    if prev_days_with_data < comparison_days:
+    # Hinweis wenn Monatsdaten verwendet werden
+    if comparison_is_monthly:
+        period_label += " (Monatsdaten)"
+    elif prev_days_with_data < comparison_days:
+        # Zusätzlicher Hinweis bei unvollständigen Daten
         period_label += f" ({prev_days_with_data}d)"
     
     # Berechne Änderungen
@@ -533,7 +614,7 @@ if prev_start is not None and prev_end is not None:
         visits_change = None
         visits_delta_text = "Keine Vergleichsdaten"
 else:
-    # Kein Vergleich ausgewählt
+    # Kein Vergleich ausgewählt oder keine Daten
     pi_change = None
     visits_change = None
     pi_delta_text = None
