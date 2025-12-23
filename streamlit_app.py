@@ -247,8 +247,32 @@ else:
 # =============================================================================
 st.sidebar.header("⚙️ Filter")
 
-# Show available data range info
-st.sidebar.info(f"📅 **Verfügbare Daten:**\n{data_min_date.strftime('%d.%m.%Y')} - {data_max_date.strftime('%d.%m.%Y')}\n({data_days_available} Tage)")
+# Show available data range info (inkl. Monatsdaten)
+DAILY_DATA_CUTOFF = date.today() - timedelta(days=180)
+
+# Monatsdaten-Range ermitteln
+monthly_min_date = None
+monthly_max_date = None
+if not df_monthly_raw.empty:
+    monthly_min_date = df_monthly_raw["datum"].min().date()
+    monthly_max_date = df_monthly_raw["datum"].max().date()
+
+# Gesamte Datenspanne (Tages- + Monatsdaten)
+overall_min_date = min(data_min_date, monthly_min_date) if monthly_min_date else data_min_date
+overall_max_date = max(data_max_date, monthly_max_date) if monthly_max_date else data_max_date
+
+st.sidebar.info(f"📅 **Verfügbare Daten:**\n{overall_min_date.strftime('%d.%m.%Y')} - {overall_max_date.strftime('%d.%m.%Y')}")
+
+# Zusätzliche Info zu Datenquellen
+with st.sidebar.expander("ℹ️ Datenverfügbarkeit"):
+    st.markdown(f"""
+    **Tagesdaten:** {data_min_date.strftime('%d.%m.%Y')} - {data_max_date.strftime('%d.%m.%Y')}
+    
+    **Monatsdaten:** {'Nicht verfügbar' if monthly_min_date is None else f"{monthly_min_date.strftime('%d.%m.%Y')} - {monthly_max_date.strftime('%d.%m.%Y')}"}
+    
+    ---
+    *Tagesdaten nur für die letzten ~180 Tage verfügbar (API-Limit). Für ältere Zeiträume: Monatsansicht verwenden.*
+    """)
 
 # Date range - Messzeitraum
 st.sidebar.subheader("📊 Messzeitraum")
@@ -483,7 +507,7 @@ if prev_start is not None and prev_end is not None:
     
     pi_prev = df_prev[df_prev["metrik"] == "Page Impressions"]["wert"].sum()
     visits_prev = df_prev[df_prev["metrik"] == "Visits"]["wert"].sum()
-    
+
     # Vergleichstext basierend auf Modus
     if comparison_mode == "Benutzerdefiniert":
         period_label = f"vs. {prev_start.strftime('%d.%m.')}-{prev_end.strftime('%d.%m.')}"
@@ -593,7 +617,7 @@ if uc_total > 0 or hp_pi_total > 0:
             st.metric(
                 label="Ø Homepage PI / Tag",
                 value=f"{hp_pi_avg:,.0f}".replace(",", ".")
-            )
+    )
 
 # =============================================================================
 # TABS
@@ -826,6 +850,18 @@ with tab2:
 # TAB 3: ZEITREIHEN
 # -----------------------------------------------------------------------------
 with tab3:
+    # =========================================================================
+    # 180-TAGE CUTOFF LOGIK
+    # =========================================================================
+    # INFOnline API liefert Tagesdaten nur für die letzten ~180 Tage
+    DAILY_DATA_DAYS_LIMIT = 180
+    daily_data_cutoff = date.today() - timedelta(days=DAILY_DATA_DAYS_LIMIT)
+    
+    # Prüfen ob ausgewählter Zeitraum außerhalb der Tagesdaten-Verfügbarkeit liegt
+    daily_data_available = start_date >= daily_data_cutoff
+    daily_data_partially_available = start_date < daily_data_cutoff <= end_date
+    daily_data_unavailable = end_date < daily_data_cutoff
+    
     # Gruppierungsauswahl: Brand oder Plattform
     col_group, col_agg = st.columns([1, 1])
     
@@ -848,12 +884,36 @@ with tab3:
     
     # Aggregationsauswahl: Tag oder Monat
     with col_agg:
-        aggregation_mode = st.radio(
-            "⏱️ Aggregation",
-            ["📅 Tagesansicht", "📆 Monatsansicht"],
-            index=0,
-            horizontal=True
-        )
+        if daily_data_unavailable:
+            # Tagesansicht komplett deaktiviert - nur Monatsdaten verfügbar
+            st.warning(f"⚠️ Für Zeiträume vor dem {daily_data_cutoff.strftime('%d.%m.%Y')} sind nur **Monatsdaten** verfügbar.")
+            aggregation_mode = "📆 Monatsansicht"
+            st.radio(
+                "⏱️ Aggregation",
+                ["📆 Monatsansicht"],
+                index=0,
+                horizontal=True,
+                disabled=True,
+                help="Tagesdaten nur für die letzten 180 Tage verfügbar"
+            )
+        elif daily_data_partially_available:
+            # Gemischter Zeitraum - Hinweis anzeigen
+            st.info(f"ℹ️ Tagesdaten ab {daily_data_cutoff.strftime('%d.%m.%Y')} verfügbar. Für ältere Daten: Monatsansicht nutzen.")
+            aggregation_mode = st.radio(
+                "⏱️ Aggregation",
+                ["📅 Tagesansicht", "📆 Monatsansicht"],
+                index=0,
+                horizontal=True,
+                help=f"Tagesdaten nur ab {daily_data_cutoff.strftime('%d.%m.%Y')} verfügbar"
+            )
+        else:
+            # Volle Tagesdaten-Verfügbarkeit
+            aggregation_mode = st.radio(
+                "⏱️ Aggregation",
+                ["📅 Tagesansicht", "📆 Monatsansicht"],
+                index=0,
+                horizontal=True
+            )
     
     is_monthly = aggregation_mode == "📆 Monatsansicht"
     
@@ -880,6 +940,11 @@ with tab3:
         # Hinweis zu YoY
         st.caption("ℹ️ *Year-over-Year (YoY) Vergleiche werden verfügbar sein, sobald Daten für mindestens 12 Monate vorliegen (voraussichtlich ab Juni 2026).*")
         
+        # Hinweis zur Datenquelle
+        if not df_monthly_raw.empty:
+            monthly_count = len(df_monthly_raw)
+            st.caption(f"📊 *{monthly_count} echte Monatsdaten aus ÖWA API verfügbar (ab Jan 2024)*")
+        
         # Gruppierungsspalte bestimmen
         group_col = "plattform" if is_platform_view else "brand"
         colors_map = platform_colors if is_platform_view else property_colors
@@ -887,26 +952,78 @@ with tab3:
         
         # Verfügbare Gruppen ermitteln
         if is_platform_view:
-            available_groups = [p for p in ["iOS", "Android", "Web", "App"] if p in df_filtered[group_col].unique()]
+            # Prüfe beide Datenquellen für verfügbare Plattformen
+            daily_platforms = df_filtered[group_col].unique().tolist() if not df_filtered.empty else []
+            monthly_platforms = df_monthly_raw[group_col].unique().tolist() if not df_monthly_raw.empty else []
+            all_platforms = list(set(daily_platforms + monthly_platforms))
+            available_groups = [p for p in ["iOS", "Android", "Web", "App"] if p in all_platforms]
         else:
             available_groups = ["VOL", "Vienna"]
         
-        # Alle verfügbaren Daten nach Monat gruppieren
-        monthly_all = df[
+        # =====================================================================
+        # HYBRID DATENQUELLEN: Echte Monatsdaten + aggregierte Tagesdaten
+        # =====================================================================
+        # Priorität: Echte Monatsdaten (df_monthly_raw) für ältere Perioden,
+        # aggregierte Tagesdaten (df) für aktuelle Perioden
+        
+        # 1. Echte Monatsdaten aus Airtable (mit _MONTH_ im Key)
+        monthly_from_api = df_monthly_raw[
+            (df_monthly_raw["brand"].isin(selected_brands)) &
+            (df_monthly_raw["metrik"].isin(selected_metrics)) &
+            (df_monthly_raw["plattform"].isin(selected_platforms))
+        ].copy() if not df_monthly_raw.empty else pd.DataFrame()
+        
+        # 2. Tagesdaten zu Monatsdaten aggregieren (für Überlappungsperioden)
+        daily_for_monthly = df[
             (df["brand"].isin(selected_brands)) &
             (df["metrik"].isin(selected_metrics)) &
             (df["plattform"].isin(selected_platforms))
         ].copy()
         
-        if monthly_all.empty:
+        # Kombiniere beide Datenquellen
+        has_api_monthly = not monthly_from_api.empty
+        has_daily_data = not daily_for_monthly.empty
+        
+        if not has_api_monthly and not has_daily_data:
             st.warning("Keine Daten für die ausgewählten Filter verfügbar.")
         else:
-            monthly_all["monat"] = monthly_all["datum"].dt.to_period("M")
-            monthly_all["monat_start"] = monthly_all["monat"].dt.to_timestamp()
-            monthly_all["monat_label"] = monthly_all["datum"].dt.strftime("%b %Y")
+            monthly_parts = []
             
-            # Pro Monat, Metrik und Gruppierung aggregieren
-            monthly_agg = monthly_all.groupby(["monat_start", "monat_label", "metrik", group_col])["wert"].sum().reset_index()
+            # Echte Monatsdaten verarbeiten
+            if has_api_monthly:
+                monthly_from_api["monat"] = monthly_from_api["datum"].dt.to_period("M")
+                monthly_from_api["monat_start"] = monthly_from_api["monat"].dt.to_timestamp()
+                monthly_from_api["monat_label"] = monthly_from_api["datum"].dt.strftime("%b %Y")
+                monthly_from_api["datenquelle"] = "API Monatsdaten"
+                # Echte Monatsdaten sind bereits Summen pro Monat
+                monthly_api_agg = monthly_from_api.groupby(
+                    ["monat_start", "monat_label", "metrik", group_col, "datenquelle"]
+                )["wert"].sum().reset_index()
+                monthly_parts.append(monthly_api_agg)
+            
+            # Tagesdaten zu Monatssummen aggregieren
+            if has_daily_data:
+                daily_for_monthly["monat"] = daily_for_monthly["datum"].dt.to_period("M")
+                daily_for_monthly["monat_start"] = daily_for_monthly["monat"].dt.to_timestamp()
+                daily_for_monthly["monat_label"] = daily_for_monthly["datum"].dt.strftime("%b %Y")
+                daily_for_monthly["datenquelle"] = "Tagesdaten aggregiert"
+                daily_agg = daily_for_monthly.groupby(
+                    ["monat_start", "monat_label", "metrik", group_col, "datenquelle"]
+                )["wert"].sum().reset_index()
+                monthly_parts.append(daily_agg)
+            
+            # Kombinieren und Duplikate entfernen (API Monatsdaten haben Priorität)
+            monthly_combined = pd.concat(monthly_parts, ignore_index=True)
+            
+            # Bei Duplikaten: Echte API-Monatsdaten bevorzugen
+            monthly_combined = monthly_combined.sort_values(
+                ["monat_start", group_col, "metrik", "datenquelle"],
+                ascending=[True, True, True, True]  # "API Monatsdaten" < "Tagesdaten aggregiert"
+            )
+            monthly_agg = monthly_combined.drop_duplicates(
+                subset=["monat_start", group_col, "metrik"],
+                keep="first"  # Behalte API-Daten wenn verfügbar
+            )
             monthly_agg = monthly_agg.sort_values("monat_start")
             
             # Für jede Metrik ein Diagramm
@@ -932,18 +1049,31 @@ with tab3:
                         # Hole den Vormonatsnamen für den Tooltip
                         group_data["vormonat"] = group_data["monat_label"].shift(1)
                         
+                        # Marker-Symbol basierend auf Datenquelle
+                        # API Monatsdaten: Kreis (circle), Tagesdaten aggregiert: Raute (diamond)
+                        if "datenquelle" in group_data.columns:
+                            marker_symbols = [
+                                "circle" if src == "API Monatsdaten" else "diamond" 
+                                for src in group_data["datenquelle"]
+                            ]
+                            # Hover-Text mit Datenquelle
+                            hover_texts = [
+                                f"<b>{group}</b><br>{row['monat_label']}<br>Wert: {row['wert']:,.0f}<br><i>({row['datenquelle']})</i>".replace(",", ".")
+                                for _, row in group_data.iterrows()
+                            ]
+                        else:
+                            marker_symbols = "circle"
+                            hover_texts = group_data["wert"].apply(lambda x: f"{x:,.0f}".replace(",", "."))
+                        
                         fig.add_trace(go.Scatter(
                             x=group_data["monat_start"],
                             y=group_data["wert"],
                             mode="lines+markers",
                             name=f"{group}",
                             line=dict(color=colors["current"], width=3),
-                            marker=dict(size=10),
-                            text=group_data["wert"].apply(lambda x: f"{x:,.0f}".replace(",", ".")),
-                            hovertemplate=f"<b>{group}</b><br>" +
-                                          "%{x|%B %Y}<br>" +
-                                          "Wert: %{text}<br>" +
-                                          "<extra></extra>"
+                            marker=dict(size=10, symbol=marker_symbols),
+                            text=hover_texts,
+                            hovertemplate="%{text}<extra></extra>"
                         ))
                         
                         # MoM-Balken mit klarer Beschriftung (Veränderung zum Vormonat)
@@ -1088,7 +1218,7 @@ with tab3:
             # Verschiebung berechnen: Vergleichsdaten auf X-Achse des aktuellen Zeitraums mappen
             day_offset = (pd.Timestamp(start_date) - pd.Timestamp(prev_start)).days
             daily_prev["datum_tag_shifted"] = daily_prev["datum_tag"] + pd.Timedelta(days=day_offset)
-        
+    
         if daily.empty:
             st.info("Keine Daten für den ausgewählten Zeitraum.")
         else:
@@ -1165,6 +1295,17 @@ with tab3:
     # Erkenntnisse-Box
     st.markdown("---")
     st.markdown("### 📊 Legende")
+    
+    # Datenquellen-Legende für Monatsansicht
+    if is_monthly:
+        st.markdown("**Datenquellen-Kennzeichnung:**")
+        col_src1, col_src2 = st.columns(2)
+        with col_src1:
+            st.markdown("⚫ **Kreis-Marker** — Echte ÖWA Monatsdaten (API)")
+        with col_src2:
+            st.markdown("◆ **Rauten-Marker** — Aus Tagesdaten aggregiert")
+        st.caption("*Für Zeiträume vor 180 Tagen sind nur echte Monatsdaten aus der ÖWA API verfügbar.*")
+        st.markdown("---")
     
     if is_platform_view:
         # Plattform-Legende

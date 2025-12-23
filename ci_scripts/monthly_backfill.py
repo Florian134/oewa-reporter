@@ -42,12 +42,19 @@ BATCH_DELAY = 0.25  # Sekunden zwischen Airtable-Batches
 # SITES KONFIGURATION
 # =============================================================================
 
-# Standard Sites (Web + App)
+# Standard Sites (Web + iOS + Android)
 SITES = [
+    # === WEB ===
     {"name": "VOL.AT Web", "site_id": "at_w_atvol", "brand": "VOL", "surface": "Web"},
     {"name": "VIENNA.AT Web", "site_id": "at_w_atvienna", "brand": "Vienna", "surface": "Web"},
-    {"name": "VOL.AT App", "site_id": "EA000004_mobile_app", "brand": "VOL", "surface": "App"},
-    {"name": "VIENNA.AT App", "site_id": "EA000003_mobile_app", "brand": "Vienna", "surface": "App"},
+    
+    # === iOS ===
+    {"name": "VOL.AT iOS", "site_id": "at_i_volat", "brand": "VOL", "surface": "iOS"},
+    {"name": "VIENNA.AT iOS", "site_id": "at_i_viennaat", "brand": "Vienna", "surface": "iOS"},
+    
+    # === Android ===
+    {"name": "VOL.AT Android", "site_id": "at_a_volat", "brand": "VOL", "surface": "Android"},
+    {"name": "VIENNA.AT Android", "site_id": "at_a_viennaat", "brand": "Vienna", "surface": "Android"},
 ]
 
 # Homepage Sites (nur für Homepage PI)
@@ -334,29 +341,29 @@ def run_monthly_backfill(start_year: int, start_month: int, end_year: int = None
                 if result["success"]:
                     value, preliminary = extract_value(result["data"], metric_key)
                     
-                if value is not None and value > 0:
-                    stats["fetched"] += 1
-                    all_records.append({
-                        "fields": {
-                            "Datum": record_date.isoformat(),
-                            "Brand": site["brand"],
-                            "Plattform": site["surface"],
-                            "Metrik": metric_name,  # Standard-Name ohne "(Monat)" Suffix
-                            "Wert": value,
-                            "Site ID": site["site_id"],
-                            "Vorläufig": preliminary,
-                            "Erfasst am": datetime.utcnow().isoformat(),
-                            "Unique Key": unique_key  # Enthält _MONTH_ zur Unterscheidung
-                        }
-                    })
+                    if value is not None and value > 0:
+                        stats["fetched"] += 1
+                        all_records.append({
+                            "fields": {
+                                "Datum": record_date.isoformat(),
+                                "Brand": site["brand"],
+                                "Plattform": site["surface"],
+                                "Metrik": metric_name,  # Standard-Name ohne "(Monat)" Suffix
+                                "Wert": value,
+                                "Site ID": site["site_id"],
+                                "Vorläufig": preliminary,
+                                "Erfasst am": datetime.utcnow().isoformat(),
+                                "Unique Key": unique_key  # Enthält _MONTH_ zur Unterscheidung
+                            }
+                        })
+                    else:
+                        stats["skipped_no_data"] += 1
                 else:
-                    stats["skipped_no_data"] += 1
-            else:
-                error_msg = result.get("error", "Unbekannter Fehler")
-                if "Keine Daten" not in error_msg:
-                    stats["errors"].append(f"{month_str} {site['name']}/{metric_name}: {error_msg}")
-                else:
-                    stats["skipped_no_data"] += 1
+                    error_msg = result.get("error", "Unbekannter Fehler")
+                    if "Keine Daten" not in error_msg:
+                        stats["errors"].append(f"{month_str} {site['name']}/{metric_name}: {error_msg}")
+                    else:
+                        stats["skipped_no_data"] += 1
     
     print(f"\n   ✓ Phase 1 abgeschlossen: {stats['fetched']} Records gesammelt")
     
