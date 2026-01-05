@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-Weekly Report Script v3.0
+Weekly Report Script v4.0
 ==========================
 Erstellt einen wöchentlichen Bericht mit:
-- NUR VOL.AT (Vienna ausgeschlossen gemäß Anforderung)
+- NUR VOL.AT (Vienna ausgeschlossen)
 - 6-Wochen-Vergleich (aktuelle Woche vs. letzte 6 Wochen)
 - Prozentuelle Veränderungen für alle KPIs
-- Streamlit-Diagramme als klickbare Bilder
-- GPT-generierte Executive Summary
-- Teams-Benachrichtigung
+- GPT-generierte Executive Summary (BULLETPOINT-FORMAT)
+- Teams-Benachrichtigung mit PROMINENTER SUMMARY
+- 6 Diagramme (analog Monthly Report)
+
+v4.0 ÄNDERUNGEN (Angleichung an Monthly Report):
+- GPT-Prompt: 200 Wörter, 5 Sektionen, Bulletpoints
+- Teams-Struktur: Prominente Summary, Trenner, gruppierte Metriken
+- Diagramme: +2 neue (Multi-Metrik %, Plattform-Anteil)
+- Upload: Robuster mit 3 Retries
 
 Nutzung:
     python ci_scripts/weekly_report.py
@@ -20,6 +26,7 @@ import requests
 import statistics
 import base64
 import io
+import time
 from datetime import date, datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 
@@ -68,9 +75,93 @@ METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
 # Anzahl der Vergleichswochen
 COMPARISON_WEEKS = 6
 
+# Plattform-Farben
+PLATFORM_COLORS = {
+    "Web": "#3B82F6",
+    "App": "#10B981",
+}
+
 
 # =============================================================================
-# DIAGRAMM-FUNKTIONEN (Größere PNGs)
+# HILFSFUNKTIONEN
+# =============================================================================
+
+def format_number(n: float) -> str:
+    """Formatiert große Zahlen lesbar (z.B. 5.5M, 789K)."""
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    elif n >= 1_000:
+        return f"{n/1_000:.0f}K"
+    return f"{n:,.0f}"
+
+
+def format_change(change: Optional[float], prefix: str = "") -> str:
+    """Formatiert prozentuale Änderung."""
+    if change is None:
+        return "N/A"
+    return f"{prefix}{change*100:+.1f}%"
+
+
+# =============================================================================
+# ROBUSTER IMAGE UPLOAD (mit Retry - analog Monthly Report)
+# =============================================================================
+
+def upload_to_imgbb_robust(image_bytes: bytes, max_retries: int = 3) -> Optional[str]:
+    """
+    Lädt ein Bild zu imgBB hoch mit Retry-Mechanismus.
+    
+    Args:
+        image_bytes: PNG-Bilddaten
+        max_retries: Maximale Anzahl Versuche
+    
+    Returns:
+        URL des hochgeladenen Bildes oder None
+    """
+    if not image_bytes or not IMGBB_API_KEY:
+        if not IMGBB_API_KEY:
+            print("   ⚠️ IMGBB_API_KEY nicht konfiguriert")
+        return None
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"   📤 Upload-Versuch {attempt + 1}/{max_retries} ({len(image_bytes)} bytes)...")
+            
+            response = requests.post(
+                "https://api.imgbb.com/1/upload",
+                data={
+                    "key": IMGBB_API_KEY,
+                    "image": base64.b64encode(image_bytes).decode("utf-8"),
+                    "expiration": 0
+                },
+                timeout=90
+            )
+            
+            if response.status_code == 200:
+                url = response.json()["data"]["url"]
+                print(f"   ✅ Upload erfolgreich: {url[:50]}...")
+                return url
+            else:
+                print(f"   ⚠️ HTTP {response.status_code}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"   ⏳ Warte {wait_time}s vor erneutem Versuch...")
+                    time.sleep(wait_time)
+                    
+        except requests.exceptions.Timeout:
+            print(f"   ⚠️ Timeout bei Versuch {attempt + 1}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        except Exception as e:
+            print(f"   ⚠️ Fehler: {type(e).__name__}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+    
+    print("   ❌ Upload nach allen Versuchen fehlgeschlagen")
+    return None
+
+
+# =============================================================================
+# DIAGRAMM-FUNKTIONEN (erweitert für v4.0)
 # =============================================================================
 
 def create_kpi_comparison_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
@@ -250,61 +341,112 @@ def create_6week_comparison_chart(weekly_data: Dict, metric: str = "Page Impress
     return fig.to_image(format="png", scale=CHART_SCALE)
 
 
+def create_multi_metric_chart(data: Dict) -> Optional[bytes]:
+    """
+    Erstellt ein Übersichts-Balkendiagramm mit allen Metrik-Änderungen (%).
+    NEU in v4.0 - analog Monthly Report.
+    """
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    chart_data = []
+    
+    for metric in ["Page Impressions", "Visits"]:
+        for platform in ["Web", "App"]:
+            key = f"VOL_{platform}"
+            if key in data and metric in data[key]:
+                m = data[key][metric]
+                pct_change = m.get("pct_change", 0) or 0
+                chart_data.append({
+                    "metrik": metric.replace("Page Impressions", "PI"),
+                    "plattform": f"VOL {platform}",
+                    "pct_change": pct_change * 100,
+                })
+    
+    if not chart_data:
+        return None
+    
+    df = pd.DataFrame(chart_data)
+    
+    fig = px.bar(
+        df,
+        x="metrik",
+        y="pct_change",
+        color="plattform",
+        barmode="group",
+        title="📊 Änderungen vs. 6-Wochen-Ø (%)",
+        color_discrete_map={
+            "VOL Web": "#3B82F6",
+            "VOL App": "#10B981"
+        },
+        text=df["pct_change"].apply(lambda x: f"{x:+.1f}%")
+    )
+    
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    
+    fig.update_layout(
+        yaxis=dict(title="Änderung (%)"),
+        xaxis_title="",
+        legend_title="",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        width=CHART_WIDTH,
+        height=CHART_HEIGHT,
+        font=dict(size=14),
+        title_font_size=20
+    )
+    
+    fig.update_traces(textposition="outside")
+    
+    return fig.to_image(format="png", scale=CHART_SCALE)
+
+
+def create_platform_pie_chart(data: Dict, metric: str = "Page Impressions") -> Optional[bytes]:
+    """
+    Erstellt ein Pie Chart für Web vs. App Anteil.
+    NEU in v4.0 - analog Monthly Report.
+    """
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    values = []
+    labels = []
+    
+    for platform in ["Web", "App"]:
+        key = f"VOL_{platform}"
+        if key in data and metric in data[key]:
+            m = data[key][metric]
+            val = m.get("current_sum", 0)
+            if val > 0:
+                values.append(val)
+                labels.append(platform)
+    
+    if not values:
+        return None
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.4,
+        marker_colors=[PLATFORM_COLORS.get(l, "#666") for l in labels],
+        textinfo="label+percent",
+        texttemplate="%{label}<br>%{percent:.1%}"
+    )])
+    
+    fig.update_layout(
+        title=f"📊 {metric} - Web vs. App Anteil",
+        width=CHART_WIDTH,
+        height=CHART_HEIGHT,
+        font=dict(size=14),
+        title_font_size=20
+    )
+    
+    return fig.to_image(format="png", scale=CHART_SCALE)
+
+
+# Alias für Rückwärtskompatibilität
 def upload_to_imgbb(image_bytes: bytes) -> Optional[str]:
-    """
-    Lädt ein Bild zu imgBB hoch.
-    
-    IMGBB_API_KEY muss in GitLab CI/CD Variables konfiguriert sein.
-    
-    Vorteile von imgBB:
-    - Kostenlos (32MB pro Bild)
-    - Permanente Speicherung (keine Löschung)
-    - Einfache API (nur ein POST-Request)
-    - Keine OAuth-Authentifizierung nötig
-    """
-    if not image_bytes:
-        print("   ⚠️ Keine Bild-Daten zum Hochladen")
-        return None
-    
-    if not IMGBB_API_KEY:
-        print("   ❌ IMGBB_API_KEY nicht konfiguriert!")
-        print("   💡 Bitte IMGBB_API_KEY in GitLab CI/CD Variables hinzufügen:")
-        print("      Settings > CI/CD > Variables > Add Variable")
-        print("      Key: IMGBB_API_KEY, Value: <Ihr imgBB API Key>")
-        return None
-    
-    print(f"   📤 Lade Bild zu imgBB hoch ({len(image_bytes)} bytes)...")
-    
-    try:
-        response = requests.post(
-            "https://api.imgbb.com/1/upload",
-            data={
-                "key": IMGBB_API_KEY,
-                "image": base64.b64encode(image_bytes).decode("utf-8")
-            },
-            timeout=60  # Erhöht für große Bilder
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            url = result["data"]["url"]
-            print(f"   ✅ Hochgeladen: {url}")
-            return url
-        else:
-            print(f"   ❌ imgBB Upload fehlgeschlagen: HTTP {response.status_code}")
-            try:
-                error_data = response.json()
-                if "error" in error_data:
-                    print(f"   📋 Fehler: {error_data['error']}")
-            except:
-                print(f"   📋 Response: {response.text[:200]}")
-            return None
-    except requests.exceptions.Timeout:
-        print("   ⚠️ imgBB Upload Timeout (60s) - Bild zu groß?")
-        return None
-    except Exception as e:
-        print(f"   ⚠️ imgBB Upload Fehler: {type(e).__name__}: {e}")
-        return None
+    """Wrapper für robuste Upload-Funktion."""
+    return upload_to_imgbb_robust(image_bytes)
 
 
 # =============================================================================
@@ -533,28 +675,29 @@ PERFORMANCE-ÜBERSICHT:
 
 ═══════════════════════════════════════════════════════════════
 
-Erstelle folgende Struktur (EXAKT einhalten):
+WICHTIG:
+- Professioneller, eloquenter Stil für Management-Ebene
+- Bei Key-Metriken: übersichtliche Bulletpoints mit gut durchdachter Kurzinterpretation
+- Interpretationen basieren auf sorgfältiger Analyse der Daten
+- MAX 200 WÖRTER GESAMT
 
-**📈 HIGHLIGHT DER WOCHE**
-[1 Satz – wichtigste Erkenntnis, z.B. stärkste Steigerung oder kritischster Rückgang vs. 6-Wochen-Ø.]
+FORMAT (EXAKT einhalten):
 
-**📊 6-WOCHEN-VERGLEICH**
-[2–3 Sätze – Entwicklung der KPIs im Vergleich zum 6-Wochen-Durchschnitt.
-Formuliere aktiv: "Visits liegen +3,2% über dem 6-Wochen-Durchschnitt".
-Vergleiche Web vs. App Performance bei VOL.]
+📈 **HIGHLIGHT DER WOCHE**
+[2-3 Sätze zur wichtigsten Erkenntnis mit konkreten Zahlen]
 
-**🧭 KONTEXT & EINORDNUNG**
-[1–2 Sätze – saisonale Muster (Wochenende, Feiertage, News-Lage),
-Abweichungen aufgrund externer Faktoren.]
+📊 **6-WOCHEN-VERGLEICH**
+• Web: [Trend + kurze Interpretation]
+• App: [Trend + kurze Interpretation]
 
-**✅ GESAMTBEWERTUNG**
-[1 Satz – Gesamtentwicklung der Woche für VOL.AT (positiv/stabil/leicht rückläufig/kritisch).]
+📈 **7-TAGE-TREND**
+[1-2 Sätze zur Entwicklung innerhalb der Woche - Peak-Tage, Muster]
 
-STILVORGABEN:
-- Professionell, prägnant, datengetrieben
-- Keine Aufzählung von Rohdaten – nur Erkenntnisse
-- Fokus auf: Was bedeutet das für das Management?
-- Maximal 180 Wörter
+🧭 **KONTEXT & EINORDNUNG**
+[1-2 Sätze zu saisonalen Faktoren, News-Lage, Besonderheiten]
+
+✅ **GESAMTBEWERTUNG**
+[1 prägnanter Satz: positiv/stabil/leicht rückläufig/kritisch + Begründung]
 """
 
     try:
@@ -613,39 +756,60 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
     else:
         color = "17A2B8"  # Blau (neutral)
     
-    # Facts aufbauen - NUR VOL
+    # === GESAMT-METRIKEN BERECHNEN ===
+    total_pi = 0
+    total_visits = 0
+    total_pi_avg = 0
+    total_visits_avg = 0
+    
+    for key in ["VOL_Web", "VOL_App"]:
+        if key in data:
+            if "Page Impressions" in data[key]:
+                total_pi += data[key]["Page Impressions"].get("current_sum", 0)
+                total_pi_avg += data[key]["Page Impressions"].get("current_avg", 0)
+            if "Visits" in data[key]:
+                total_visits += data[key]["Visits"].get("current_sum", 0)
+                total_visits_avg += data[key]["Visits"].get("current_avg", 0)
+    
+    # Web/App Split berechnen
+    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
+    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
+    web_share = (web_pi / total_pi * 100) if total_pi > 0 else 0
+    app_share = (app_pi / total_pi * 100) if total_pi > 0 else 0
+    
+    # Gesamt-Änderung berechnen
+    web_pi_change = data.get("VOL_Web", {}).get("Page Impressions", {}).get("pct_change")
+    app_pi_change = data.get("VOL_App", {}).get("Page Impressions", {}).get("pct_change")
+    
+    # === FACTS AUFBAUEN (v4.0 - Prominente Summary) ===
     facts = [
-        {"name": "📅 Zeitraum", "value": period},
-        {"name": "📊 Vergleich", "value": f"Ø/Tag vs. Ø/Tag der letzten {COMPARISON_WEEKS} Wochen"}
+        # Metadaten
+        {"name": "📅 Berichtszeitraum", "value": period},
+        {"name": "📊 Vergleich mit", "value": f"Ø der letzten {COMPARISON_WEEKS} Wochen"},
+        {"name": "═══════════════", "value": "═══════════════"},
+        # Gesamt-Summary (prominent)
+        {"name": "📊 **GESAMT PI**", "value": f"**{total_pi:,}** (Ø {format_number(total_pi_avg)}/Tag)"},
+        {"name": "📊 **GESAMT Visits**", "value": f"**{total_visits:,}** (Ø {format_number(total_visits_avg)}/Tag)"},
+        {"name": "📱 **Plattform-Split**", "value": f"Web {web_share:.0f}% | App {app_share:.0f}%"},
+        {"name": "═══════════════", "value": "═══════════════"},
     ]
     
-    # VOL Web - alle Metriken inkl. Homepage PI
-    # PROFESSIONELL: Tagesdurchschnitte anzeigen für fairen Vergleich
-    if "VOL_Web" in data:
-        for metric in ["Page Impressions", "Visits", "Homepage PI", "Unique Clients"]:
-            if metric in data["VOL_Web"]:
-                m = data["VOL_Web"][metric]
-                if m.get("current_sum", 0) > 0:  # Nur anzeigen wenn Daten vorhanden
-                    pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
-                    avg_value = m.get("current_avg", 0)
-                    days = m.get("current_days", 0)
-                    facts.append({
-                        "name": f"📊 VOL Web {metric}",
-                        "value": f"Ø {avg_value:,.0f}/Tag{pct}"
-                    })
+    # Plattform-Detail
+    if "VOL_Web" in data and "Page Impressions" in data["VOL_Web"]:
+        m = data["VOL_Web"]["Page Impressions"]
+        pct = format_change(m.get('pct_change'))
+        facts.append({
+            "name": "📊 VOL Web PI",
+            "value": f"Ø {m.get('current_avg', 0):,.0f}/Tag ({pct})"
+        })
     
-    # VOL App - OHNE Homepage PI (existiert nicht für Apps)
-    if "VOL_App" in data:
-        for metric in ["Page Impressions", "Visits", "Unique Clients"]:
-            if metric in data["VOL_App"]:
-                m = data["VOL_App"][metric]
-                if m.get("current_sum", 0) > 0:  # Nur anzeigen wenn Daten vorhanden
-                    pct = f" ({m['pct_change']*100:+.1f}%)" if m.get('pct_change') is not None else ""
-                    avg_value = m.get("current_avg", 0)
-                    facts.append({
-                        "name": f"📊 VOL App {metric}",
-                        "value": f"Ø {avg_value:,.0f}/Tag{pct}"
-                    })
+    if "VOL_App" in data and "Page Impressions" in data["VOL_App"]:
+        m = data["VOL_App"]["Page Impressions"]
+        pct = format_change(m.get('pct_change'))
+        facts.append({
+            "name": "📊 VOL App PI",
+            "value": f"Ø {m.get('current_avg', 0):,.0f}/Tag ({pct})"
+        })
     
     # Sections
     sections = [
@@ -699,31 +863,30 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
 
 def run_weekly_report():
     """
-    Hauptfunktion für den Wochenbericht.
+    Hauptfunktion für den Wochenbericht v4.0.
     NUR VOL.AT mit 6-Wochen-Vergleich.
+    
+    v4.0 FEATURES:
+    - Prominente Summary
+    - 5-Sektionen GPT-Analyse mit Bulletpoints
+    - 6 Diagramme (analog Monthly Report)
+    - Robuster Image Upload
     """
     print("=" * 70)
-    print("📊 ÖWA WEEKLY REPORT v3.0")
-    print("   NUR VOL.AT (Web + App)")
-    print(f"   Vergleich: Aktuelle Woche vs. {COMPARISON_WEEKS}-Wochen-Durchschnitt")
+    print("📊 ÖWA WEEKLY REPORT v4.0")
+    print("   • Prominente Summary")
+    print("   • Bulletpoint-Format")
+    print("   • 6 Diagramme (analog Monthly Report)")
+    print(f"   • Vergleich: Aktuelle Woche vs. {COMPARISON_WEEKS}-Wochen-Ø")
     print("=" * 70)
     
     # Konfigurationsstatus ausgeben
     print("\n🔧 KONFIGURATION:")
-    print(f"   AIRTABLE_API_KEY: {'✅ Konfiguriert' if AIRTABLE_API_KEY else '❌ FEHLT!'}")
-    print(f"   TEAMS_WEBHOOK_URL: {'✅ Konfiguriert' if TEAMS_WEBHOOK_URL else '❌ FEHLT!'}")
-    print(f"   OPENAI_API_KEY: {'✅ Konfiguriert' if OPENAI_API_KEY else '⚠️ Optional'}")
-    print(f"   IMGBB_API_KEY: {'✅ Konfiguriert' if IMGBB_API_KEY else '❌ FEHLT - Keine Charts!'}")
-    print(f"   PLOTLY_AVAILABLE: {'✅ Ja' if PLOTLY_AVAILABLE else '❌ Nein'}")
-    
-    if not IMGBB_API_KEY:
-        print("\n" + "⚠️" * 20)
-        print("   WICHTIG: IMGBB_API_KEY fehlt!")
-        print("   Charts können nicht zu Imgur hochgeladen werden.")
-        print("   Lösung: GitLab CI/CD > Settings > CI/CD > Variables")
-        print("           Variable hinzufügen: IMGBB_API_KEY = <Ihre Client ID>")
-        print("           Imgur App registrieren: https://api.imgur.com/oauth2/addclient")
-        print("⚠️" * 20 + "\n")
+    print(f"   AIRTABLE_API_KEY: {'✅' if AIRTABLE_API_KEY else '❌'}")
+    print(f"   TEAMS_WEBHOOK_URL: {'✅' if TEAMS_WEBHOOK_URL else '❌'}")
+    print(f"   OPENAI_API_KEY: {'✅' if OPENAI_API_KEY else '⚠️'}")
+    print(f"   IMGBB_API_KEY: {'✅' if IMGBB_API_KEY else '❌'}")
+    print(f"   PLOTLY_AVAILABLE: {'✅' if PLOTLY_AVAILABLE else '❌'}")
     
     if not AIRTABLE_API_KEY:
         print("❌ AIRTABLE_API_KEY nicht gesetzt!")
@@ -763,46 +926,68 @@ def run_weekly_report():
             print(f"      {metric}: {m['current_sum']:,} ({days} Tage, Ø {daily_avg:,.0f}/Tag)")
             print(f"               vs. 6-Wochen-Ø {prev_daily_avg:,.0f}/Tag → {pct}")
     
-    # Diagramme erstellen und zu Imgur hochladen
+    # ==========================================================================
+    # DIAGRAMME ERSTELLEN (v4.0 - 6 Charts analog Monthly Report)
+    # ==========================================================================
     image_urls = {}
     if PLOTLY_AVAILABLE:
-        print("\n📊 Erstelle Diagramme (1600x800)...")
+        print("\n📊 Erstelle Diagramme (v4.0 - 6 Charts)...")
         
         try:
-            # PI Vergleich (Aktuell vs. 6-Wochen-Ø)
+            # 1. PI Vergleich (Aktuell vs. 6-Wochen-Ø)
             chart_bytes = create_kpi_comparison_chart(data, "Page Impressions")
             if chart_bytes:
-                print("   → PI-Vergleich (vs. 6-Wochen-Ø) erstellt")
+                print("   → PI-Vergleich erstellt")
                 url = upload_to_imgbb(chart_bytes)
                 if url:
-                    image_urls["VOL Page Impressions vs. 6-Wochen-Ø"] = url
+                    image_urls["PI vs. 6-Wochen-Ø"] = url
             
-            # Visits Vergleich
+            # 2. Visits Vergleich
             visits_chart = create_kpi_comparison_chart(data, "Visits")
             if visits_chart:
                 print("   → Visits-Vergleich erstellt")
                 url = upload_to_imgbb(visits_chart)
                 if url:
-                    image_urls["VOL Visits vs. 6-Wochen-Ø"] = url
+                    image_urls["Visits vs. 6-Wochen-Ø"] = url
             
-            # 7-Tage Trend Chart
+            # 3. 7-Tage Trend Chart
             trend_bytes = create_trend_chart(data, "Page Impressions")
             if trend_bytes:
                 print("   → 7-Tage-Trend erstellt")
                 url = upload_to_imgbb(trend_bytes)
                 if url:
-                    image_urls["VOL 7-Tage-Trend PI"] = url
+                    image_urls["7-Tage-Trend PI"] = url
             
-            # 7-Wochen-Übersicht
+            # 4. 7-Wochen-Übersicht
             week_chart = create_6week_comparison_chart(data, "Page Impressions")
             if week_chart:
                 print("   → 7-Wochen-Übersicht erstellt")
                 url = upload_to_imgbb(week_chart)
                 if url:
-                    image_urls["VOL 7-Wochen-Übersicht PI"] = url
+                    image_urls["7-Wochen-Übersicht PI"] = url
+            
+            # 5. Multi-Metrik Übersicht (NEU - analog Monthly)
+            multi_chart = create_multi_metric_chart(data)
+            if multi_chart:
+                print("   → Multi-Metrik Übersicht erstellt")
+                url = upload_to_imgbb(multi_chart)
+                if url:
+                    image_urls["Änderungen-Übersicht (%)"] = url
+            
+            # 6. Plattform-Anteil Pie (NEU - analog Monthly)
+            pie_chart = create_platform_pie_chart(data, "Page Impressions")
+            if pie_chart:
+                print("   → Plattform-Anteil erstellt")
+                url = upload_to_imgbb(pie_chart)
+                if url:
+                    image_urls["Web vs. App Anteil"] = url
+            
+            print(f"\n   ✅ {len(image_urls)} Diagramme erfolgreich hochgeladen")
                     
         except Exception as e:
             print(f"   ⚠️ Diagramm-Erstellung fehlgeschlagen: {e}")
+            import traceback
+            traceback.print_exc()
     
     # GPT Summary
     print("\n🤖 Generiere KI-Zusammenfassung...")
@@ -815,7 +1000,7 @@ def run_weekly_report():
     send_teams_report(title, summary, data, period, image_urls)
     
     print("\n" + "=" * 70)
-    print("✅ WEEKLY REPORT v3.0 ABGESCHLOSSEN")
+    print("✅ WEEKLY REPORT v4.0 ABGESCHLOSSEN")
     print("=" * 70)
 
 
