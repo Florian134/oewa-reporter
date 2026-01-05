@@ -21,12 +21,21 @@ INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
 
-# Sites zum Testen
+# Sites zum Testen (Web + iOS + Android)
 TEST_SITES = [
+    # === WEB ===
     {"name": "VOL.AT Web", "site_id": "at_w_atvol", "brand": "VOL", "surface": "Web"},
     {"name": "VIENNA.AT Web", "site_id": "at_w_atvienna", "brand": "Vienna", "surface": "Web"},
-    {"name": "VOL.AT App", "site_id": "EA000004_mobile_app", "brand": "VOL", "surface": "App"},
-    {"name": "VIENNA.AT App", "site_id": "EA000003_mobile_app", "brand": "Vienna", "surface": "App"},
+    
+    # === iOS ===
+    {"name": "VOL.AT iOS", "site_id": "at_i_volat", "brand": "VOL", "surface": "iOS"},
+    {"name": "VIENNA.AT iOS", "site_id": "at_i_viennaat", "brand": "Vienna", "surface": "iOS"},
+    
+    # === Android ===
+    {"name": "VOL.AT Android", "site_id": "at_a_volat", "brand": "VOL", "surface": "Android"},
+    {"name": "VIENNA.AT Android", "site_id": "at_a_viennaat", "brand": "Vienna", "surface": "Android"},
+    
+    # === Homepage ===
     {"name": "VOL.AT Homepage", "site_id": "BE000072", "brand": "VOL", "surface": "Web", "metric": "Homepage PI"},
     {"name": "VIENNA.AT Homepage", "site_id": "BE000043", "brand": "Vienna", "surface": "Web", "metric": "Homepage PI"},
 ]

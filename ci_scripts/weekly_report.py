@@ -51,10 +51,16 @@ CHART_SCALE = 2  # Retina-Qualität
 REPORT_DELAY_DAYS = 2
 
 # Farben - NUR VOL (Vienna ausgeschlossen)
+# NEU: iOS und Android werden zu "App" aggregiert
 BRAND_COLORS = {
     "VOL Web": "#3B82F6",      # Blau
-    "VOL App": "#60A5FA",      # Hellblau
+    "VOL App": "#60A5FA",      # Hellblau (iOS + Android aggregiert)
+    "VOL iOS": "#10B981",      # Grün
+    "VOL Android": "#F59E0B",  # Orange
 }
+
+# Plattformen, die als "App" zusammengefasst werden
+APP_PLATFORMS = ["iOS", "Android"]
 
 # Metriken-Konfiguration
 METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
@@ -395,6 +401,10 @@ def process_data(records: List[Dict], week_start: date, week_end: date = None) -
             datum = date.fromisoformat(datum_str)
         except:
             continue
+        
+        # NEU: iOS und Android werden als "App" aggregiert
+        if surface in APP_PLATFORMS:
+            surface = "App"
         
         key = f"{brand}_{surface}"
         

@@ -53,7 +53,9 @@ CHART_SCALE = 2
 # Farben - NUR VOL (Vienna ausgeschlossen)
 BRAND_COLORS = {
     "VOL Web": "#3B82F6",      # Blau
-    "VOL App": "#60A5FA",      # Hellblau
+    "VOL App": "#60A5FA",      # Hellblau (iOS + Android aggregiert)
+    "VOL iOS": "#10B981",      # Grün
+    "VOL Android": "#F59E0B",  # Orange
 }
 
 METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
@@ -61,8 +63,13 @@ METRICS = ["Page Impressions", "Visits", "Unique Clients", "Homepage PI"]
 # Plattform-Farben für getrennte Darstellung
 PLATFORM_COLORS = {
     "Web": "#3B82F6",      # Blau
-    "App": "#10B981",      # Grün
+    "App": "#10B981",      # Grün (iOS + Android aggregiert)
+    "iOS": "#10B981",      # Grün
+    "Android": "#F59E0B",  # Orange
 }
+
+# Plattformen, die als "App" zusammengefasst werden
+APP_PLATFORMS = ["iOS", "Android"]
 
 
 # =============================================================================
@@ -338,6 +345,10 @@ def process_monthly_data(current_records: List[Dict], prev_records: List[Dict]) 
         if not all([datum_str, brand, metric, wert]):
             continue
         
+        # NEU: iOS und Android werden als "App" aggregiert
+        if surface in APP_PLATFORMS:
+            surface = "App"
+        
         key = f"{brand}_{surface}"
         
         if key not in data:
@@ -365,6 +376,10 @@ def process_monthly_data(current_records: List[Dict], prev_records: List[Dict]) 
         
         if not all([brand, metric, wert]):
             continue
+        
+        # NEU: iOS und Android werden als "App" aggregiert
+        if surface in APP_PLATFORMS:
+            surface = "App"
         
         key = f"{brand}_{surface}"
         

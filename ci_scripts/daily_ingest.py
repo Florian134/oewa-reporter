@@ -40,16 +40,20 @@ ALERT_THRESHOLD_PCT = 0.10
 STANDARD_DELAY_DAYS = 2  # PI, Visits, Homepage PI
 
 # =============================================================================
-# SITES KONFIGURATION - Erweitert für Web + App
+# SITES KONFIGURATION - Erweitert für Web + iOS + Android
 # =============================================================================
 SITES = [
     # === WEB ===
     {"name": "VOL.AT Web", "site_id": "at_w_atvol", "brand": "VOL", "surface": "Web"},
     {"name": "VIENNA.AT Web", "site_id": "at_w_atvienna", "brand": "Vienna", "surface": "Web"},
     
-    # === APP ===
-    {"name": "VOL.AT App", "site_id": "EA000004_mobile_app", "brand": "VOL", "surface": "App"},
-    {"name": "VIENNA.AT App", "site_id": "EA000003_mobile_app", "brand": "Vienna", "surface": "App"},
+    # === iOS ===
+    {"name": "VOL.AT iOS", "site_id": "at_i_volat", "brand": "VOL", "surface": "iOS"},
+    {"name": "VIENNA.AT iOS", "site_id": "at_i_viennaat", "brand": "Vienna", "surface": "iOS"},
+    
+    # === Android ===
+    {"name": "VOL.AT Android", "site_id": "at_a_volat", "brand": "VOL", "surface": "Android"},
+    {"name": "VIENNA.AT Android", "site_id": "at_a_viennaat", "brand": "Vienna", "surface": "Android"},
 ]
 
 # Homepage Sites (nur Web, Belegungseinheiten)
@@ -166,17 +170,58 @@ def check_existing_records(target_date: date) -> set:
     return existing_keys
 
 
-def save_to_airtable(records: list, existing_keys: set = None) -> dict:
-    """Speichert Records in Airtable (überspringt Duplikate)"""
+def check_key_exists(unique_key: str) -> bool:
+    """
+    Prüft ob ein spezifischer Unique Key bereits in Airtable existiert.
+    
+    Diese Funktion wird als LETZTE Absicherung vor dem Insert verwendet,
+    um Race Conditions zwischen parallelen Pipelines zu verhindern.
+    """
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    
+    try:
+        # Escape single quotes in the key for Airtable formula
+        escaped_key = unique_key.replace("'", "\\'")
+        params = {
+            "filterByFormula": f"{{Unique Key}} = '{escaped_key}'",
+            "fields[]": ["Unique Key"],
+            "maxRecords": 1
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return len(data.get("records", [])) > 0
+    except Exception:
+        pass
+    
+    return False
+
+
+def save_to_airtable(records: list, existing_keys: set = None, double_check: bool = True) -> dict:
+    """
+    Speichert Records in Airtable mit robuster Duplikat-Prüfung.
+    
+    Args:
+        records: Liste von Records zum Speichern
+        existing_keys: Set von bereits bekannten Unique Keys (erste Prüfebene)
+        double_check: Wenn True, wird jeder Key nochmal einzeln geprüft (zweite Prüfebene)
+    
+    Die doppelte Prüfung verhindert Duplikate bei parallelen Pipeline-Läufen:
+    1. Erste Prüfung: Gegen existing_keys Set (schnell, aber evtl. veraltet)
+    2. Zweite Prüfung: Direkt gegen Airtable vor jedem Insert (langsamer, aber aktuell)
+    """
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    results = {"created": 0, "skipped": 0, "errors": []}
+    results = {"created": 0, "skipped": 0, "skipped_double_check": 0, "errors": []}
     
-    # Duplikate filtern
+    # ERSTE PRÜFUNG: Gegen existing_keys Set filtern
     if existing_keys:
         new_records = []
         for record in records:
@@ -189,6 +234,23 @@ def save_to_airtable(records: list, existing_keys: set = None) -> dict:
     
     if not records:
         print("   ℹ️ Keine neuen Records zum Speichern")
+        return results
+    
+    # ZWEITE PRÜFUNG (optional): Jeden Key nochmal einzeln prüfen vor dem Insert
+    # Dies verhindert Duplikate bei parallelen Pipeline-Läufen
+    if double_check:
+        verified_records = []
+        for record in records:
+            unique_key = record.get("fields", {}).get("Unique Key")
+            if unique_key and check_key_exists(unique_key):
+                results["skipped_double_check"] += 1
+                print(f"   ⚠️ Double-Check: {unique_key} existiert bereits - übersprungen")
+            else:
+                verified_records.append(record)
+        records = verified_records
+    
+    if not records:
+        print("   ℹ️ Nach Double-Check: Keine neuen Records zum Speichern")
         return results
     
     # Batch-Insert (max 10 pro Request)
@@ -204,7 +266,9 @@ def save_to_airtable(records: list, existing_keys: set = None) -> dict:
             if response.status_code in (200, 201):
                 results["created"] += len(batch)
             else:
-                results["errors"].append(f"Batch {i//10 + 1}: {response.text[:100]}")
+                # Bei Fehler prüfen ob es ein Duplikat-Fehler ist
+                error_text = response.text[:200]
+                results["errors"].append(f"Batch {i//10 + 1}: {error_text}")
         except Exception as e:
             results["errors"].append(f"Batch {i//10 + 1}: {str(e)}")
     
@@ -214,6 +278,9 @@ def save_to_airtable(records: list, existing_keys: set = None) -> dict:
 def get_historical_data(brand: str, surface: str, metric: str, weekday: int, weeks: int = 6) -> List[Dict]:
     """
     Holt historische Daten für den gleichen Wochentag der letzten X Wochen.
+    
+    WICHTIG: Schließt Monatsdaten (_MONTH_ im Unique Key) aus, da diese aggregierte
+    Werte enthalten und den Wochentags-Vergleich verfälschen würden.
     
     Args:
         brand: "VOL" oder "Vienna"
@@ -229,7 +296,10 @@ def get_historical_data(brand: str, surface: str, metric: str, weekday: int, wee
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
     
     # Formel für Airtable: Brand + Plattform + Metrik
-    formula = f"AND({{Brand}} = '{brand}', {{Plattform}} = '{surface}', {{Metrik}} = '{metric}')"
+    # WICHTIG: Monatsdaten ausschließen! Diese haben "_MONTH_" im Unique Key
+    # und verfälschen den Wochentags-Vergleich (z.B. 30.11. = Sonntag hat sowohl
+    # Tagesdaten ~670k als auch Monatssumme ~24 Mio)
+    formula = f"AND({{Brand}} = '{brand}', {{Plattform}} = '{surface}', {{Metrik}} = '{metric}', SEARCH('_MONTH_', {{Unique Key}}) = 0)"
     
     try:
         params = {
@@ -680,10 +750,13 @@ def main():
     
     if records_to_create:
         print(f"\n💾 Speichere {len(records_to_create)} Datensätze in Airtable...")
-        save_result = save_to_airtable(records_to_create, existing_keys)
+        print(f"   ℹ️ Double-Check aktiviert: Jeder Key wird vor Insert nochmal geprüft")
+        save_result = save_to_airtable(records_to_create, existing_keys, double_check=True)
         print(f"   ✅ Erstellt: {save_result['created']}")
         if save_result.get("skipped", 0) > 0:
-            print(f"   ⏭️ Übersprungen (Duplikate): {save_result['skipped']}")
+            print(f"   ⏭️ Übersprungen (1. Prüfung): {save_result['skipped']}")
+        if save_result.get("skipped_double_check", 0) > 0:
+            print(f"   ⏭️ Übersprungen (Double-Check): {save_result['skipped_double_check']}")
         if save_result["errors"]:
             for err in save_result["errors"]:
                 print(f"   ❌ {err}")

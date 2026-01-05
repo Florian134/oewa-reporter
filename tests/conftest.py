@@ -48,7 +48,8 @@ def vol_sites():
     """VOL.AT Site-IDs"""
     return {
         "web": "at_w_atvol",
-        "app": "EA000004_mobile_app",
+        "ios": "at_i_volat",
+        "android": "at_a_volat",
         "homepage": "BE000072"
     }
 
@@ -58,7 +59,8 @@ def vienna_sites():
     """VIENNA.AT Site-IDs"""
     return {
         "web": "at_w_atvienna",
-        "app": "EA000003_mobile_app",
+        "ios": "at_i_viennaat",
+        "android": "at_a_viennaat",
         "homepage": "BE000043"
     }
 
@@ -73,8 +75,8 @@ def expected_metrics():
 def unique_key_pattern():
     """Regex-Pattern für Unique Keys"""
     import re
-    # Format: YYYY-MM-DD_Brand_Plattform_Metrik
-    return re.compile(r"^\d{4}-\d{2}-\d{2}_(VOL|Vienna)_(Web|App)_.+$")
+    # Format: YYYY-MM-DD_Brand_Plattform_Metrik (Web, iOS, Android)
+    return re.compile(r"^\d{4}-\d{2}-\d{2}_(VOL|Vienna)_(Web|iOS|Android)_.+$")
 
 
 def pytest_configure(config):

@@ -70,19 +70,77 @@ test_full_suite:
   allow_failure: true
 
 # =============================================================================
-# DAILY INGESTION v2.0 - Web + App, alle Metriken, integriertes Alerting
+# COMPREHENSIVE TEST SUITE - Ganzheitliche Validierung aller Komponenten
+# Prüft: Datenintegrität, Alerting-Logik, API-Vergleich
+# Triggern mit: JOB_TYPE=comprehensive_test ODER wöchentlicher Schedule
+# =============================================================================
+comprehensive_test:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "🔬 ÖWA Comprehensive Test Suite v1.0"
+    - echo "   5 Test-Ebenen für vollständige Validierung"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - |
+      if [ "$INCLUDE_API" = "true" ]; then
+        echo "   Mit API-Vergleich aktiviert"
+        python ci_scripts/comprehensive_test.py --full --days ${TEST_DAYS:-30}
+      else
+        echo "   Ohne API-Vergleich (schneller)"
+        python ci_scripts/comprehensive_test.py --days ${TEST_DAYS:-30}
+      fi
+  rules:
+    - if: $JOB_TYPE == "comprehensive_test"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $TEST_TYPE == "comprehensive"
+  allow_failure: false  # Kritische Fehler blockieren Pipeline
+
+# Manueller Schnelltest für Datenintegrität
+integrity_quick_check:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "🔍 Quick Integrity Check"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - python ci_scripts/comprehensive_test.py --integrity --days ${TEST_DAYS:-7}
+  rules:
+    - if: $JOB_TYPE == "integrity_check"
+  allow_failure: true
+
+# Manueller Alerting-Test
+alerting_test:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - echo "🔔 Alerting Logic Test"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - python ci_scripts/comprehensive_test.py --alerting
+  rules:
+    - if: $JOB_TYPE == "alerting_test"
+  allow_failure: false  # Alerting-Fehler sind kritisch
+
+# =============================================================================
+# DAILY INGESTION v2.1 - Web + App, alle Metriken, integriertes Alerting
 # Wird bei jedem Standard-Trigger ausgeführt (außer bei spezifischen Job-Types)
+# NEU: Doppelte Duplikat-Prüfung um Race Conditions zu verhindern
 # =============================================================================
 daily_ingest:
   stage: run
   image: python:3.11-slim
   script:
-    - echo "🚀 ÖWA Reporter - Daily Ingestion v2.0"
+    - echo "🚀 ÖWA Reporter - Daily Ingestion v2.1"
     - echo "   Web + App | PI + Visits + UC + HP-PI"
+    - echo "   Double-Check Modus aktiviert für Duplikat-Schutz"
     - pip install --upgrade pip
     - pip install requests python-dotenv openai
     - python ci_scripts/daily_ingest.py
     - echo "✅ Daily Ingestion completed!"
+    # Automatischer Integritäts-Check nach dem Ingest
+    - echo "🔍 Running Comprehensive Integrity Check..."
+    - python ci_scripts/comprehensive_test.py --integrity --days 7
+    - echo "✅ Integrity Check passed!"
   rules:
     - if: $JOB_TYPE == "backfill"
       when: never
@@ -193,6 +251,32 @@ monthly_report:
   rules:
     - if: $JOB_TYPE == "monthly"
     - if: $CI_COMMIT_REF_NAME == "monthly-trigger" && $CI_PIPELINE_SOURCE == "trigger"
+
+# =============================================================================
+# DATA INTEGRITY CHECK v1.0 - Prüft auf Duplikate und Datenqualität
+# Triggern mit: JOB_TYPE=integrity_check
+# Optional: CHECK_DAYS=7 (default: 7)
+# Optional: AUTO_FIX=true um Duplikate automatisch zu entfernen
+# =============================================================================
+data_integrity_check:
+  stage: run
+  image: python:3.11-slim
+  script:
+    - echo "🔍 ÖWA Reporter - Data Integrity Check v1.0"
+    - pip install --upgrade pip
+    - pip install requests python-dotenv
+    - |
+      if [ "$AUTO_FIX" = "true" ]; then
+        echo "   AUTO-FIX aktiviert - Duplikate werden entfernt!"
+        python ci_scripts/data_integrity_check.py --days ${CHECK_DAYS:-7} --fix
+      else
+        echo "   Nur Prüfung (ohne --fix)"
+        python ci_scripts/data_integrity_check.py --days ${CHECK_DAYS:-7}
+      fi
+    - echo "✅ Integrity Check completed!"
+  rules:
+    - if: $JOB_TYPE == "integrity_check"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CHECK_TYPE == "integrity"
 
 # =============================================================================
 # ALERT CHECK - Manueller Alert-Check (Alerting ist jetzt in daily_ingest integriert)
