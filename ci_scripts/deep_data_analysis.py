@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from monthly_data_utils import get_monthly_data
 
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in CI/CD Variables gesetzt sein
 INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 
 # VOL.AT Site IDs

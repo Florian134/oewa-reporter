@@ -9,7 +9,7 @@ from datetime import date, timedelta
 
 # Test-Konfiguration
 TEST_AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-TEST_AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+TEST_AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss für Tests gesetzt sein
 TEST_INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 
 

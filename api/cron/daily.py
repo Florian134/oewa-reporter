@@ -88,7 +88,7 @@ class handler(BaseHTTPRequestHandler):
         # Config laden
         api_key = os.getenv("INFONLINE_API_KEY", "")
         airtable_key = os.getenv("AIRTABLE_API_KEY", "")
-        airtable_base = os.getenv("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+        airtable_base = os.getenv("AIRTABLE_BASE_ID", "")  # Muss in Umgebungsvariablen gesetzt sein
         teams_webhook = os.getenv("TEAMS_WEBHOOK_URL", "")
         
         if not api_key:

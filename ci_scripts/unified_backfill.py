@@ -37,7 +37,7 @@ from typing import Tuple, Optional, Dict, List, Set
 # =============================================================================
 INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in CI/CD Variables gesetzt sein
 
 # Unique Clients Verzögerung (Tage)
 UC_DELAY_DAYS = 3

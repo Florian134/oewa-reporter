@@ -406,7 +406,7 @@ class Config:
         
         # Airtable Konfiguration
         config.airtable.api_key = os.getenv("AIRTABLE_API_KEY", "")
-        config.airtable.base_id = os.getenv("AIRTABLE_BASE_ID", "appj6S8TQHMlKyahg")
+        config.airtable.base_id = os.getenv("AIRTABLE_BASE_ID", "")  # Muss in Umgebungsvariablen gesetzt sein
         config.airtable.enabled = parse_bool(os.getenv("AIRTABLE_ENABLED", "false"))
         config.airtable.measurements_table = os.getenv("AIRTABLE_MEASUREMENTS_TABLE", "Measurements")
         config.airtable.alerts_table = os.getenv("AIRTABLE_ALERTS_TABLE", "Alerts")

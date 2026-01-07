@@ -19,7 +19,7 @@ from collections import defaultdict
 # Konfiguration
 INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in CI/CD Variables gesetzt sein
 
 # Sites zum Testen (Web + iOS + Android)
 TEST_SITES = [

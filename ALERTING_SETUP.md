@@ -45,7 +45,7 @@ Das Alert-System prüft täglich nach der Datenerfassung, ob kritische Schwellen
 ```javascript
 // ÖWA Alert Check - Airtable Automation Script
 let response = await fetch(
-    'https://gitlab.com/api/v4/projects/76833234/trigger/pipeline',
+    'https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline',
     {
         method: 'POST',
         headers: {
@@ -69,7 +69,7 @@ Alternativ kann der Alert-Check direkt nach dem Daily Ingest laufen. Dafür die 
 ```javascript
 // Beide Jobs nacheinander triggern
 let ingestResponse = await fetch(
-    'https://gitlab.com/api/v4/projects/76833234/trigger/pipeline',
+    'https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline',
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -82,7 +82,7 @@ console.log('Daily Ingest gestartet');
 await new Promise(resolve => setTimeout(resolve, 120000));
 
 let alertResponse = await fetch(
-    'https://gitlab.com/api/v4/projects/76833234/trigger/pipeline',
+    'https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline',
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -109,7 +109,7 @@ console.log('Alert Check gestartet');
 ```bash
 # Environment Variables setzen
 export AIRTABLE_API_KEY="pat..."
-export AIRTABLE_BASE_ID="appTIeod85xnBy7Vn"
+export AIRTABLE_BASE_ID="app_your_base_id"
 export TEAMS_WEBHOOK_URL="https://russmedia.webhook..."
 export OPENAI_API_KEY="sk-proj-..."
 

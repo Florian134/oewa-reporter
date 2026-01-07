@@ -96,7 +96,7 @@ if not check_password():
 # AIRTABLE CONFIG (from Streamlit Secrets)
 # =============================================================================
 AIRTABLE_API_KEY = st.secrets.get("AIRTABLE_API_KEY", os.getenv("AIRTABLE_API_KEY", ""))
-AIRTABLE_BASE_ID = st.secrets.get("AIRTABLE_BASE_ID", os.getenv("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn"))
+AIRTABLE_BASE_ID = st.secrets.get("AIRTABLE_BASE_ID", os.getenv("AIRTABLE_BASE_ID", ""))  # Muss in Secrets gesetzt sein
 
 # =============================================================================
 # DATA LOADING FROM AIRTABLE

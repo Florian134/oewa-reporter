@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import datetime
 
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in Umgebungsvariablen gesetzt sein
 
 BACKUP_FILE = "app_data_backup_stats.json"
 

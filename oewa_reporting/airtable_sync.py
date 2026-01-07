@@ -48,7 +48,7 @@ class AirtableConfig:
         """Lädt Konfiguration aus Environment"""
         return cls(
             api_key=os.getenv("AIRTABLE_API_KEY", ""),
-            base_id=os.getenv("AIRTABLE_BASE_ID", "appj6S8TQHMlKyahg"),  # Default VOL.at Base
+            base_id=os.getenv("AIRTABLE_BASE_ID", ""),  # Muss in Umgebungsvariablen gesetzt sein
             measurements_table=os.getenv("AIRTABLE_MEASUREMENTS_TABLE", "Measurements"),
             alerts_table=os.getenv("AIRTABLE_ALERTS_TABLE", "Alerts"),
             summaries_table=os.getenv("AIRTABLE_SUMMARIES_TABLE", "Summaries"),
