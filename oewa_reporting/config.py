@@ -270,44 +270,44 @@ class SiteConfig:
 # VOL.at Site-Definitionen
 VOL_SITES: List[SiteConfig] = [
     SiteConfig(
-        site_id="EA000004_desktop",
+        site_id="at_w_atvol",
         brand="vol",
-        surface="web_desktop",
-        name="VOL.at Web Desktop"
+        surface="web",
+        name="VOL.at Web"
     ),
     SiteConfig(
-        site_id="EA000004_mobile_web",
+        site_id="at_i_volat",
         brand="vol",
-        surface="web_mobile",
-        name="VOL.at Web Mobile"
+        surface="ios",
+        name="VOL.at iOS"
     ),
     SiteConfig(
-        site_id="EA000004_mobile_app",
+        site_id="at_a_volat",
         brand="vol",
-        surface="app",
-        name="VOL.at App"
+        surface="android",
+        name="VOL.at Android"
     ),
 ]
 
 # Optional: Vienna.at Sites
 VIENNA_SITES: List[SiteConfig] = [
     SiteConfig(
-        site_id="EA000003_desktop",
+        site_id="at_w_atvienna",
         brand="vienna",
-        surface="web_desktop",
-        name="VIENNA.at Web Desktop"
+        surface="web",
+        name="VIENNA.at Web"
     ),
     SiteConfig(
-        site_id="EA000003_mobile_web",
+        site_id="at_i_viennaat",
         brand="vienna",
-        surface="web_mobile",
-        name="VIENNA.at Web Mobile"
+        surface="ios",
+        name="VIENNA.at iOS"
     ),
     SiteConfig(
-        site_id="EA000003_mobile_app",
+        site_id="at_a_viennaat",
         brand="vienna",
-        surface="app",
-        name="VIENNA.at App"
+        surface="android",
+        name="VIENNA.at Android"
     ),
 ]
 
@@ -406,7 +406,7 @@ class Config:
         
         # Airtable Konfiguration
         config.airtable.api_key = os.getenv("AIRTABLE_API_KEY", "")
-        config.airtable.base_id = os.getenv("AIRTABLE_BASE_ID", "appj6S8TQHMlKyahg")
+        config.airtable.base_id = os.getenv("AIRTABLE_BASE_ID", "")  # Muss in Umgebungsvariablen gesetzt sein
         config.airtable.enabled = parse_bool(os.getenv("AIRTABLE_ENABLED", "false"))
         config.airtable.measurements_table = os.getenv("AIRTABLE_MEASUREMENTS_TABLE", "Measurements")
         config.airtable.alerts_table = os.getenv("AIRTABLE_ALERTS_TABLE", "Alerts")

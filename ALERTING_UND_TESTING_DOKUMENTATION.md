@@ -263,7 +263,7 @@ Status: ✅ Erfolgreich (TEST)
 | Variable | Beschreibung | Erforderlich |
 |----------|-------------|--------------|
 | `AIRTABLE_API_KEY` | Airtable Personal Access Token | ✅ Ja |
-| `AIRTABLE_BASE_ID` | `appTIeod85xnBy7Vn` | ✅ Ja |
+| `AIRTABLE_BASE_ID` | Über GitLab CI/CD Variables | ✅ Ja |
 | `TEAMS_WEBHOOK_URL` | MS Teams Incoming Webhook | ✅ Ja |
 | `OPENAI_API_KEY` | OpenAI API Key | ⚠️ Für GPT |
 
@@ -298,7 +298,7 @@ Alle Variablen müssen in GitLab → Settings → CI/CD → Variables eingetrage
 ```javascript
 // ÖWA Alert Check
 let response = await fetch(
-    'https://gitlab.com/api/v4/projects/76833234/trigger/pipeline',
+    'https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline',
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -313,7 +313,7 @@ console.log('Alert Check gestartet:', await response.json());
 ```javascript
 // Notification Test (manuell triggern)
 let response = await fetch(
-    'https://gitlab.com/api/v4/projects/76833234/trigger/pipeline',
+    'https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline',
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},

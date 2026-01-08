@@ -37,7 +37,7 @@ from typing import Tuple, Optional, Dict, List, Set
 # =============================================================================
 INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appTIeod85xnBy7Vn")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in CI/CD Variables gesetzt sein
 
 # Unique Clients Verzögerung (Tage)
 UC_DELAY_DAYS = 3
@@ -50,12 +50,19 @@ BATCH_DELAY = 0.25  # Sekunden zwischen Airtable-Batches
 # SITES KONFIGURATION
 # =============================================================================
 
-# Standard Sites (Web + App)
+# Standard Sites (Web + iOS + Android)
 SITES = [
+    # === WEB ===
     {"name": "VOL.AT Web", "site_id": "at_w_atvol", "brand": "VOL", "surface": "Web"},
     {"name": "VIENNA.AT Web", "site_id": "at_w_atvienna", "brand": "Vienna", "surface": "Web"},
-    {"name": "VOL.AT App", "site_id": "EA000004_mobile_app", "brand": "VOL", "surface": "App"},
-    {"name": "VIENNA.AT App", "site_id": "EA000003_mobile_app", "brand": "Vienna", "surface": "App"},
+    
+    # === iOS ===
+    {"name": "VOL.AT iOS", "site_id": "at_i_volat", "brand": "VOL", "surface": "iOS"},
+    {"name": "VIENNA.AT iOS", "site_id": "at_i_viennaat", "brand": "Vienna", "surface": "iOS"},
+    
+    # === Android ===
+    {"name": "VOL.AT Android", "site_id": "at_a_volat", "brand": "VOL", "surface": "Android"},
+    {"name": "VIENNA.AT Android", "site_id": "at_a_viennaat", "brand": "Vienna", "surface": "Android"},
 ]
 
 # Homepage Sites (nur für Homepage PI)
@@ -166,9 +173,45 @@ def get_existing_keys(dry_run: bool = False) -> Set[str]:
     return existing_keys
 
 
-def save_to_airtable(records: List[dict], dry_run: bool = False) -> dict:
-    """Speichert Records in Airtable (Batch-Insert)"""
-    results = {"created": 0, "errors": []}
+def check_key_exists(unique_key: str) -> bool:
+    """
+    Prüft ob ein spezifischer Unique Key bereits in Airtable existiert.
+    
+    Diese Funktion wird als LETZTE Absicherung vor dem Insert verwendet,
+    um Race Conditions zwischen parallelen Pipelines zu verhindern.
+    """
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Measurements"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    
+    try:
+        escaped_key = unique_key.replace("'", "\\'")
+        params = {
+            "filterByFormula": f"{{Unique Key}} = '{escaped_key}'",
+            "fields[]": ["Unique Key"],
+            "maxRecords": 1
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return len(data.get("records", [])) > 0
+    except Exception:
+        pass
+    
+    return False
+
+
+def save_to_airtable(records: List[dict], dry_run: bool = False, double_check: bool = True) -> dict:
+    """
+    Speichert Records in Airtable mit robuster Duplikat-Prüfung.
+    
+    Args:
+        records: Liste von Records zum Speichern
+        dry_run: Wenn True, nur simulieren
+        double_check: Wenn True, wird jeder Key nochmal einzeln geprüft vor dem Insert
+    """
+    results = {"created": 0, "skipped_double_check": 0, "errors": []}
     
     if not records:
         return results
@@ -183,6 +226,25 @@ def save_to_airtable(records: List[dict], dry_run: bool = False) -> dict:
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
+    
+    # Double-Check: Jeden Key nochmal einzeln prüfen vor dem Insert
+    if double_check:
+        verified_records = []
+        for record in records:
+            unique_key = record.get("fields", {}).get("Unique Key")
+            if unique_key and check_key_exists(unique_key):
+                results["skipped_double_check"] += 1
+            else:
+                verified_records.append(record)
+        
+        if results["skipped_double_check"] > 0:
+            print(f"\n   ⚠️ Double-Check: {results['skipped_double_check']} Keys existierten bereits - übersprungen")
+        
+        records = verified_records
+    
+    if not records:
+        print("   ℹ️ Nach Double-Check: Keine neuen Records zum Speichern")
+        return results
     
     # Batch-Insert (max 10 pro Request)
     for i in range(0, len(records), 10):
@@ -296,6 +358,7 @@ def run_unified_backfill(days: int = 90, start_date: date = None, end_date: date
         "fetched": 0,
         "created": 0,
         "skipped_duplicate": 0,
+        "skipped_double_check": 0,
         "skipped_uc_zero": 0,
         "skipped_no_data": 0,
         "errors": []
@@ -485,10 +548,14 @@ def run_unified_backfill(days: int = 90, start_date: date = None, end_date: date
     
     if all_records:
         print(f"\n   💾 Speichere {len(all_records)} Records...")
-        save_result = save_to_airtable(all_records, dry_run)
+        print(f"   ℹ️ Double-Check aktiviert: Jeder Key wird vor Insert nochmal geprüft")
+        save_result = save_to_airtable(all_records, dry_run, double_check=True)
         stats["created"] = save_result["created"]
+        stats["skipped_double_check"] = save_result.get("skipped_double_check", 0)
         stats["errors"].extend(save_result["errors"])
         print(f"   ✓ {save_result['created']} Records erfolgreich gespeichert")
+        if save_result.get("skipped_double_check", 0) > 0:
+            print(f"   ⚠️ {save_result['skipped_double_check']} Records durch Double-Check übersprungen")
     else:
         print("\n   ℹ️ Keine neuen Records zu speichern")
     
@@ -499,14 +566,15 @@ def run_unified_backfill(days: int = 90, start_date: date = None, end_date: date
     print("📋 ZUSAMMENFASSUNG")
     print("=" * 70)
     print(f"""
-   ┌────────────────────────────────────────┐
-   │  📊 Von API abgerufen:    {stats['fetched']:>6}       │
-   │  ✅ In Airtable erstellt: {stats['created']:>6}       │
-   │  ⏭️ Duplikate übersprungen: {stats['skipped_duplicate']:>4}       │
-   │  🚫 UC=0 übersprungen:    {stats['skipped_uc_zero']:>6}       │
-   │  ⚠️ Keine Daten:          {stats['skipped_no_data']:>6}       │
-   │  ❌ Fehler:               {len(stats['errors']):>6}       │
-   └────────────────────────────────────────┘
+   ┌──────────────────────────────────────────┐
+   │  📊 Von API abgerufen:      {stats['fetched']:>6}       │
+   │  ✅ In Airtable erstellt:   {stats['created']:>6}       │
+   │  ⏭️ Duplikate (1. Prüfung): {stats['skipped_duplicate']:>6}       │
+   │  ⏭️ Duplikate (2. Prüfung): {stats['skipped_double_check']:>6}       │
+   │  🚫 UC=0 übersprungen:      {stats['skipped_uc_zero']:>6}       │
+   │  ⚠️ Keine Daten:            {stats['skipped_no_data']:>6}       │
+   │  ❌ Fehler:                 {len(stats['errors']):>6}       │
+   └──────────────────────────────────────────┘
 """)
     
     if stats["errors"]:

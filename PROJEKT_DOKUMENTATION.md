@@ -128,7 +128,7 @@ Entwicklung eines Proof-of-Concept (PoC) für ein ÖWA/INFOnline-Reporting-Syste
 
 ### Datenbank
 - **Airtable** - Primäre Datenspeicherung
-  - Base ID: `appTIeod85xnBy7Vn`
+  - Base ID: Über CI/CD Variables konfiguriert
   - Tabellen: Measurements, Alerts, Weekly Reports
 
 ### Frontend
@@ -165,15 +165,15 @@ Entwicklung eines Proof-of-Concept (PoC) für ein ÖWA/INFOnline-Reporting-Syste
 |----------|-------------|-----------|
 | `INFONLINE_API_KEY` | INFOnline API Key | Nein |
 | `AIRTABLE_API_KEY` | Airtable Personal Access Token | Nein |
-| `AIRTABLE_BASE_ID` | `appTIeod85xnBy7Vn` | Nein |
+| `AIRTABLE_BASE_ID` | Airtable Base ID | ✅ Ja (Masked) |
 | `TEAMS_WEBHOOK_URL` | MS Teams Incoming Webhook | Nein |
 | `OPENAI_API_KEY` | OpenAI API Key | Nein |
 
 ### Streamlit Cloud Secrets
 
 ```toml
-AIRTABLE_API_KEY = "pat..."
-AIRTABLE_BASE_ID = "appTIeod85xnBy7Vn"
+AIRTABLE_API_KEY = "pat_your_token_here"
+AIRTABLE_BASE_ID = "app_your_base_id"
 ```
 
 ### Airtable Automations
@@ -261,7 +261,7 @@ SITES = [
 | Falsche Site IDs | `at_w_atvol` statt `EA000004` | 03.12.2025 |
 | API Response Parsing | `data["data"]["pageimpressions"][0]["pis"]` | 03.12.2025 |
 | Airtable Auth | Neuer Personal Access Token | 03.12.2025 |
-| Airtable Base ID Typo | `appTIeod85xnBy7Vn` (mit I) | 03.12.2025 |
+| Airtable Base ID Typo | Korrigiert | 03.12.2025 |
 | Single Select Options | Manuell in Airtable hinzugefügt | 03.12.2025 |
 | Korrupte requirements.txt | Neu erstellt mit UTF-8 | 03.12.2025 |
 | Plotly 6.x Kompatibilität | `update_layout(yaxis=dict(...))` | 03.12.2025 |
@@ -314,7 +314,7 @@ oewa-reporter/
 **GitLab CI/CD Trigger (Airtable Automation):**
 ```javascript
 let response = await fetch(
-    'https://gitlab.com/api/v4/projects/76833234/trigger/pipeline',
+    'https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline',
     {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
