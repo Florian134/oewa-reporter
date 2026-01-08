@@ -209,7 +209,7 @@ weekly_report:
   script:
     - echo "📊 ÖWA Reporter - Weekly Report v3.0"
     - pip install --upgrade pip
-    - pip install requests python-dotenv openai plotly "kaleido>=1.0.0" pandas
+    - pip install requests python-dotenv openai 'plotly[kaleido]' pandas
     - python ci_scripts/weekly_report.py
     - echo "✅ Weekly Report completed!"
     # Charts für Pages anzeigen
@@ -238,7 +238,7 @@ monthly_report:
   script:
     - echo "📊 ÖWA Reporter - Monthly Report v1.0"
     - pip install --upgrade pip
-    - pip install requests python-dotenv openai plotly "kaleido>=1.0.0" pandas
+    - pip install requests python-dotenv openai 'plotly[kaleido]' pandas
     - |
       if [ -n "$REPORT_MONTH" ]; then
         echo "   Bericht für: $REPORT_MONTH"
