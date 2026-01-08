@@ -523,6 +523,32 @@ def process_data(records: List[Dict], week_start: date, week_end: date = None) -
     # Datenstruktur initialisieren
     data = {}
     
+    # Hilfsfunktion: Metrik-Datenstruktur initialisieren
+    def init_metric_data():
+        return {
+            "current_sum": 0,
+            "current_days": 0,
+            "daily": {},
+            "weekly_values": [{"label": w["label"], "value": 0, "days": 0, "is_current": w["is_current"]} for w in weeks],
+            "weeks_with_data": 0
+        }
+    
+    # Hilfsfunktion: Wert zu Metrik hinzufügen
+    def add_to_metric(key: str, metric: str, datum: date, datum_str: str, wert: int, week_idx: int):
+        if key not in data:
+            data[key] = {}
+        if metric not in data[key]:
+            data[key][metric] = init_metric_data()
+        
+        data[key][metric]["weekly_values"][week_idx]["value"] += wert
+        data[key][metric]["weekly_values"][week_idx]["days"] += 1
+        
+        # Aktuelle Woche separat tracken
+        if week_idx == 0:
+            data[key][metric]["current_sum"] += wert
+            data[key][metric]["current_days"] += 1
+            data[key][metric]["daily"][datum_str] = data[key][metric]["daily"].get(datum_str, 0) + wert
+    
     # Records nach Datum zuordnen
     for record in records:
         fields = record.get("fields", {})
@@ -544,35 +570,24 @@ def process_data(records: List[Dict], week_start: date, week_end: date = None) -
         except:
             continue
         
-        # NEU: iOS und Android werden als "App" aggregiert
-        if surface in APP_PLATFORMS:
-            surface = "App"
-        
-        key = f"{brand}_{surface}"
-        
-        if key not in data:
-            data[key] = {}
-        if metric not in data[key]:
-            data[key][metric] = {
-                "current_sum": 0,
-                "current_days": 0,
-                "daily": {},
-                "weekly_values": [{"label": w["label"], "value": 0, "days": 0, "is_current": w["is_current"]} for w in weeks],
-                "weeks_with_data": 0
-            }
-        
         # Welche Woche?
+        week_idx = None
         for idx, week in enumerate(weeks):
             if week["start"] <= datum <= week["end"]:
-                data[key][metric]["weekly_values"][idx]["value"] += wert
-                data[key][metric]["weekly_values"][idx]["days"] += 1
-                
-                # Aktuelle Woche separat tracken
-                if idx == 0:
-                    data[key][metric]["current_sum"] += wert
-                    data[key][metric]["current_days"] += 1
-                    data[key][metric]["daily"][datum_str] = wert
+                week_idx = idx
                 break
+        
+        if week_idx is None:
+            continue
+        
+        # IMMER: Originale Plattform speichern (iOS, Android, Web)
+        original_key = f"{brand}_{surface}"
+        add_to_metric(original_key, metric, datum, datum_str, wert, week_idx)
+        
+        # ZUSÄTZLICH: iOS und Android auch zu "App" aggregieren
+        if surface in APP_PLATFORMS:
+            app_key = f"{brand}_App"
+            add_to_metric(app_key, metric, datum, datum_str, wert, week_idx)
     
     # Berechnungen: 6-Wochen-Durchschnitt und prozentuelle Änderungen
     # WICHTIG: Für faire Vergleiche bei unterschiedlicher Tagesanzahl
@@ -604,10 +619,23 @@ def process_data(records: List[Dict], week_start: date, week_end: date = None) -
                     m["pct_change"] = (m["current_avg"] - m["avg_daily_6_weeks"]) / m["avg_daily_6_weeks"]
                 else:
                     m["pct_change"] = None
-    else:
+                
+                # NEU: vs_prev_week (Vergleich mit Vorwoche)
+                # Index 1 = Vorwoche (KW-1)
+                prev_week = m["weekly_values"][1] if len(m["weekly_values"]) > 1 else None
+                if prev_week and prev_week["days"] > 0:
+                    prev_week_avg = prev_week["value"] / prev_week["days"]
+                    if prev_week_avg > 0:
+                        m["vs_prev_week"] = (m["current_avg"] - prev_week_avg) / prev_week_avg
+                    else:
+                        m["vs_prev_week"] = None
+                else:
+                    m["vs_prev_week"] = None
+            else:
                 m["avg_6_weeks"] = 0
                 m["avg_daily_6_weeks"] = 0
                 m["pct_change"] = None
+                m["vs_prev_week"] = None
     
     return data
 
@@ -730,96 +758,141 @@ FORMAT (EXAKT einhalten):
 
 def send_teams_report(title: str, summary: str, data: Dict, period: str, image_urls: Dict[str, str] = None):
     """
-    Sendet den Wochenbericht an Teams mit Diagrammen.
-    NUR VOL-Daten mit 6-Wochen-Vergleich.
+    Sendet den Wochenbericht an Teams mit strukturierter KPI-Übersicht.
+    
+    v5.0 Format - 5 KPI-Sektionen (analog Monthly Report):
+    1. GESAMTENTWICKLUNG (Web + App)
+    2. WEB-ENTWICKLUNG
+    3. APP-ENTWICKLUNG (Gesamt)
+    4. APP-ENTWICKLUNG (iOS)
+    5. APP-ENTWICKLUNG (Android)
+    
+    Jede Sektion: Visits, PI, UC, (HPPI nur bei Web/Gesamt)
+    Format: Metrik WERT (vs Vorwoche: ±X.XX%, vs 6W-Ø: ±X.XX%)
     """
     if not TEAMS_WEBHOOK_URL:
         print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
         return
     
-    # Farbe basierend auf Gesamtperformance (vs. 6-Wochen-Ø)
-    total_positive = 0
-    total_negative = 0
-    for key in data:
-        for metric in data[key]:
-            m = data[key][metric]
-            if m.get("pct_change") is not None:
-                if m["pct_change"] > 0:
-                    total_positive += 1
-                else:
-                    total_negative += 1
+    # === HILFSFUNKTION: Metrik-Zeile formatieren ===
+    def format_metric_line(label: str, current: int, vs_prev_week: float, vs_avg: float) -> str:
+        """Formatiert eine Metrik-Zeile für Weekly Report"""
+        prev_str = format_change(vs_prev_week)
+        avg_str = format_change(vs_avg)
+        return f"{label} **{current:,}** (vs Vorwoche: {prev_str}, vs {COMPARISON_WEEKS}W-Ø: {avg_str})"
     
-    if total_positive > total_negative:
+    # === DATEN EXTRAHIEREN ===
+    def get_platform_metrics(key: str) -> Dict:
+        """Extrahiert alle Metriken für eine Plattform"""
+        platform_data = data.get(key, {})
+        
+        return {
+            "visits": int(platform_data.get("Visits", {}).get("current_sum", 0)),
+            "visits_vs_avg": platform_data.get("Visits", {}).get("pct_change"),
+            "visits_vs_prev": platform_data.get("Visits", {}).get("vs_prev_week"),
+            "pi": int(platform_data.get("Page Impressions", {}).get("current_sum", 0)),
+            "pi_vs_avg": platform_data.get("Page Impressions", {}).get("pct_change"),
+            "pi_vs_prev": platform_data.get("Page Impressions", {}).get("vs_prev_week"),
+            "uc": int(platform_data.get("Unique Clients", {}).get("current_sum", 0)),
+            "uc_vs_avg": platform_data.get("Unique Clients", {}).get("pct_change"),
+            "uc_vs_prev": platform_data.get("Unique Clients", {}).get("vs_prev_week"),
+            "hppi": int(platform_data.get("Homepage PI", {}).get("current_sum", 0)),
+            "hppi_vs_avg": platform_data.get("Homepage PI", {}).get("pct_change"),
+            "hppi_vs_prev": platform_data.get("Homepage PI", {}).get("vs_prev_week"),
+        }
+    
+    # Plattform-Daten laden
+    web = get_platform_metrics("VOL_Web")
+    app = get_platform_metrics("VOL_App")
+    ios = get_platform_metrics("VOL_iOS")
+    android = get_platform_metrics("VOL_Android")
+    
+    # === GESAMT berechnen (Web + App) ===
+    total_visits = web["visits"] + app["visits"]
+    total_pi = web["pi"] + app["pi"]
+    total_uc = web["uc"] + app["uc"]
+    total_hppi = web["hppi"]  # HPPI nur Web
+    
+    # Gesamt-Änderungen (gewichteter Durchschnitt basierend auf Werten)
+    def weighted_avg_change(val1: int, change1: float, val2: int, change2: float) -> float:
+        """Berechnet gewichteten Durchschnitt der Änderungen"""
+        if change1 is None and change2 is None:
+            return None
+        total = val1 + val2
+        if total == 0:
+            return None
+        c1 = change1 if change1 is not None else 0
+        c2 = change2 if change2 is not None else 0
+        return (val1 * c1 + val2 * c2) / total
+    
+    total_visits_vs_avg = weighted_avg_change(web["visits"], web["visits_vs_avg"], app["visits"], app["visits_vs_avg"])
+    total_visits_vs_prev = weighted_avg_change(web["visits"], web["visits_vs_prev"], app["visits"], app["visits_vs_prev"])
+    total_pi_vs_avg = weighted_avg_change(web["pi"], web["pi_vs_avg"], app["pi"], app["pi_vs_avg"])
+    total_pi_vs_prev = weighted_avg_change(web["pi"], web["pi_vs_prev"], app["pi"], app["pi_vs_prev"])
+    total_uc_vs_avg = weighted_avg_change(web["uc"], web["uc_vs_avg"], app["uc"], app["uc_vs_avg"])
+    total_uc_vs_prev = weighted_avg_change(web["uc"], web["uc_vs_prev"], app["uc"], app["uc_vs_prev"])
+    
+    # Farbe basierend auf Gesamtperformance
+    if total_pi_vs_avg and total_pi_vs_avg > 0:
         color = "28A745"  # Grün
-    elif total_negative > total_positive:
+    elif total_pi_vs_avg and total_pi_vs_avg < -0.05:
         color = "FFC107"  # Gelb
     else:
         color = "17A2B8"  # Blau (neutral)
     
-    # === GESAMT-METRIKEN BERECHNEN ===
-    total_pi = 0
-    total_visits = 0
-    total_pi_avg = 0
-    total_visits_avg = 0
+    # === KPI-SEKTIONEN BAUEN ===
     
-    for key in ["VOL_Web", "VOL_App"]:
-        if key in data:
-            if "Page Impressions" in data[key]:
-                total_pi += data[key]["Page Impressions"].get("current_sum", 0)
-                total_pi_avg += data[key]["Page Impressions"].get("current_avg", 0)
-            if "Visits" in data[key]:
-                total_visits += data[key]["Visits"].get("current_sum", 0)
-                total_visits_avg += data[key]["Visits"].get("current_avg", 0)
+    # Metadaten
+    kpi_text = f"**📅 Berichtszeitraum:** {period}\n"
+    kpi_text += f"**📊 Vergleich mit:** Ø der letzten {COMPARISON_WEEKS} Wochen\n\n"
+    kpi_text += "---\n\n"
     
-    # Web/App Split berechnen
-    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
-    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
-    web_share = (web_pi / total_pi * 100) if total_pi > 0 else 0
-    app_share = (app_pi / total_pi * 100) if total_pi > 0 else 0
+    # 1. GESAMTENTWICKLUNG
+    kpi_text += "**📊 GESAMTENTWICKLUNG**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', total_visits, total_visits_vs_prev, total_visits_vs_avg)}\n"
+    kpi_text += f"• {format_metric_line('PI', total_pi, total_pi_vs_prev, total_pi_vs_avg)}\n"
+    kpi_text += f"• {format_metric_line('UC', total_uc, total_uc_vs_prev, total_uc_vs_avg)}\n"
+    kpi_text += f"• {format_metric_line('HPPI', total_hppi, web['hppi_vs_prev'], web['hppi_vs_avg'])}\n\n"
     
-    # Gesamt-Änderung berechnen
-    web_pi_change = data.get("VOL_Web", {}).get("Page Impressions", {}).get("pct_change")
-    app_pi_change = data.get("VOL_App", {}).get("Page Impressions", {}).get("pct_change")
+    # 2. WEB-ENTWICKLUNG
+    kpi_text += "**🌐 WEB-ENTWICKLUNG**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', web['visits'], web['visits_vs_prev'], web['visits_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('PI', web['pi'], web['pi_vs_prev'], web['pi_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('UC', web['uc'], web['uc_vs_prev'], web['uc_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('HPPI', web['hppi'], web['hppi_vs_prev'], web['hppi_vs_avg'])}\n\n"
     
-    # === FACTS AUFBAUEN (v4.0 - Prominente Summary) ===
-    facts = [
-        # Metadaten
-        {"name": "📅 Berichtszeitraum", "value": period},
-        {"name": "📊 Vergleich mit", "value": f"Ø der letzten {COMPARISON_WEEKS} Wochen"},
-        {"name": "═══════════════", "value": "═══════════════"},
-        # Gesamt-Summary (prominent)
-        {"name": "📊 **GESAMT PI**", "value": f"**{total_pi:,}** (Ø {format_number(total_pi_avg)}/Tag)"},
-        {"name": "📊 **GESAMT Visits**", "value": f"**{total_visits:,}** (Ø {format_number(total_visits_avg)}/Tag)"},
-        {"name": "📱 **Plattform-Split**", "value": f"Web {web_share:.0f}% | App {app_share:.0f}%"},
-        {"name": "═══════════════", "value": "═══════════════"},
-    ]
+    # 3. APP-ENTWICKLUNG (Gesamt)
+    kpi_text += "**📱 APP-ENTWICKLUNG (Gesamt)**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', app['visits'], app['visits_vs_prev'], app['visits_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('PI', app['pi'], app['pi_vs_prev'], app['pi_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('UC', app['uc'], app['uc_vs_prev'], app['uc_vs_avg'])}\n\n"
     
-    # Plattform-Detail
-    if "VOL_Web" in data and "Page Impressions" in data["VOL_Web"]:
-        m = data["VOL_Web"]["Page Impressions"]
-        pct = format_change(m.get('pct_change'))
-        facts.append({
-            "name": "📊 VOL Web PI",
-            "value": f"Ø {m.get('current_avg', 0):,.0f}/Tag ({pct})"
-        })
+    # 4. APP-ENTWICKLUNG (iOS)
+    kpi_text += "**🍎 APP-ENTWICKLUNG (iOS)**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', ios['visits'], ios['visits_vs_prev'], ios['visits_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('PI', ios['pi'], ios['pi_vs_prev'], ios['pi_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('UC', ios['uc'], ios['uc_vs_prev'], ios['uc_vs_avg'])}\n\n"
     
-    if "VOL_App" in data and "Page Impressions" in data["VOL_App"]:
-        m = data["VOL_App"]["Page Impressions"]
-        pct = format_change(m.get('pct_change'))
-        facts.append({
-            "name": "📊 VOL App PI",
-            "value": f"Ø {m.get('current_avg', 0):,.0f}/Tag ({pct})"
-        })
+    # 5. APP-ENTWICKLUNG (Android)
+    kpi_text += "**🤖 APP-ENTWICKLUNG (Android)**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', android['visits'], android['visits_vs_prev'], android['visits_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('PI', android['pi'], android['pi_vs_prev'], android['pi_vs_avg'])}\n"
+    kpi_text += f"• {format_metric_line('UC', android['uc'], android['uc_vs_prev'], android['uc_vs_avg'])}\n"
     
-    # Sections
+    # === SECTIONS BAUEN ===
     sections = [
         {
             "activityTitle": title,
-            "facts": facts,
+            "activitySubtitle": "📢 VOL.AT Wochenbericht v5.0",
             "markdown": True
         },
         {
-            "text": f"**🤖 KI-Analyse:**\n\n{summary}",
+            "text": kpi_text,
+            "markdown": True
+        },
+        {
+            "title": "🤖 KI-Analyse",
+            "text": summary,
             "markdown": True
         }
     ]
@@ -850,7 +923,7 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
     try:
         response = requests.post(TEAMS_WEBHOOK_URL, json=card, timeout=30)
         if response.status_code == 200:
-            print("✅ Teams Bericht gesendet")
+            print("✅ Wochenbericht v5.0 an Teams gesendet")
         else:
             print(f"⚠️ Teams Fehler: {response.status_code}")
     except Exception as e:

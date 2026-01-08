@@ -812,49 +812,102 @@ def send_monthly_teams_report_v4(title: str, summary: str, data: Dict,
                                   current_month: str, prev_month: str,
                                   yoy_data: Dict, image_urls: Dict = None):
     """
-    Sendet den Monatsbericht an Teams mit PROMINENTER SUMMARY.
+    Sendet den Monatsbericht an Teams mit strukturierter KPI-Übersicht.
     
-    v4.0 Format:
-    1. GESAMTSUMMARY ganz oben
-    2. Plattform-Detail
-    3. KI-Analyse (Bulletpoints)
-    4. Diagramme
+    v5.0 Format - 5 KPI-Sektionen:
+    1. GESAMTENTWICKLUNG (Web + App)
+    2. WEB-ENTWICKLUNG
+    3. APP-ENTWICKLUNG (Gesamt)
+    4. APP-ENTWICKLUNG (iOS)
+    5. APP-ENTWICKLUNG (Android)
+    
+    Jede Sektion: Visits, PI, UC, (HPPI nur bei Web/Gesamt)
+    Format: Metrik WERT (MoM: ±X.XX%, YoY: ±X.XX%)
     """
     if not TEAMS_WEBHOOK_URL:
         print("⚠️ TEAMS_WEBHOOK_URL nicht konfiguriert")
         return
     
-    # === GESAMT-METRIKEN BERECHNEN ===
-    total_pi = 0
-    total_visits = 0
-    total_pi_prev = 0
-    total_visits_prev = 0
-    
-    for key in ["VOL_Web", "VOL_App"]:
-        if key in data:
-            total_pi += data[key].get("Page Impressions", {}).get("current_sum", 0)
-            total_visits += data[key].get("Visits", {}).get("current_sum", 0)
-            total_pi_prev += data[key].get("Page Impressions", {}).get("prev_sum", 0)
-            total_visits_prev += data[key].get("Visits", {}).get("prev_sum", 0)
-    
-    # Gesamt MoM berechnen
-    total_pi_mom = ((total_pi - total_pi_prev) / total_pi_prev) if total_pi_prev > 0 else None
-    total_visits_mom = ((total_visits - total_visits_prev) / total_visits_prev) if total_visits_prev > 0 else None
-    
-    # YoY-Daten
     yoy_changes = yoy_data.get("yoy_changes", {})
     
-    # Web/App Split
-    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
-    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
-    web_share = (web_pi / total_pi * 100) if total_pi > 0 else 0
-    app_share = (app_pi / total_pi * 100) if total_pi > 0 else 0
+    # === HILFSFUNKTION: Metrik-Zeile formatieren ===
+    def format_metric_line(label: str, current: int, mom: float, yoy: float, is_uc: bool = False) -> str:
+        """Formatiert eine Metrik-Zeile: Label WERT (MoM: ±X.XX%, YoY: ±X.XX%)"""
+        mom_str = format_change(mom)
+        # UC YoY ist immer N/A wegen Methodenwechsel Juli 2025
+        yoy_str = "N/A*" if is_uc else format_change(yoy)
+        return f"{label} **{current:,}** (MoM: {mom_str}, YoY: {yoy_str})"
     
-    # iOS/Android Split (NEU)
-    ios_pi = data.get("VOL_iOS", {}).get("Page Impressions", {}).get("current_sum", 0)
-    android_pi = data.get("VOL_Android", {}).get("Page Impressions", {}).get("current_sum", 0)
-    ios_share = (ios_pi / app_pi * 100) if app_pi > 0 else 0
-    android_share = (android_pi / app_pi * 100) if app_pi > 0 else 0
+    # === DATEN EXTRAHIEREN ===
+    def get_platform_metrics(key: str) -> Dict:
+        """Extrahiert alle Metriken für eine Plattform"""
+        platform_data = data.get(key, {})
+        yoy_platform = yoy_changes.get(key, {})
+        
+        return {
+            "visits": platform_data.get("Visits", {}).get("current_sum", 0),
+            "visits_mom": platform_data.get("Visits", {}).get("mom_change"),
+            "visits_yoy": yoy_platform.get("Visits"),
+            "pi": platform_data.get("Page Impressions", {}).get("current_sum", 0),
+            "pi_mom": platform_data.get("Page Impressions", {}).get("mom_change"),
+            "pi_yoy": yoy_platform.get("Page Impressions"),
+            "uc": platform_data.get("Unique Clients", {}).get("current_sum", 0),
+            "uc_mom": platform_data.get("Unique Clients", {}).get("mom_change"),
+            "hppi": platform_data.get("Homepage PI", {}).get("current_sum", 0),
+            "hppi_mom": platform_data.get("Homepage PI", {}).get("mom_change"),
+            "hppi_yoy": yoy_platform.get("Homepage PI"),
+        }
+    
+    # Plattform-Daten laden
+    web = get_platform_metrics("VOL_Web")
+    app = get_platform_metrics("VOL_App")
+    ios = get_platform_metrics("VOL_iOS")
+    android = get_platform_metrics("VOL_Android")
+    
+    # === GESAMT berechnen (Web + App) ===
+    def calc_mom(curr: int, prev_sum: int) -> float:
+        """Berechnet MoM aus current und prev_sum"""
+        if prev_sum > 0:
+            return (curr - prev_sum) / prev_sum
+        return None
+    
+    # Gesamt-Summen
+    total_visits = web["visits"] + app["visits"]
+    total_pi = web["pi"] + app["pi"]
+    total_uc = web["uc"] + app["uc"]
+    total_hppi = web["hppi"]  # HPPI nur Web
+    
+    # Gesamt Prev-Summen für MoM
+    total_visits_prev = (data.get("VOL_Web", {}).get("Visits", {}).get("prev_sum", 0) + 
+                         data.get("VOL_App", {}).get("Visits", {}).get("prev_sum", 0))
+    total_pi_prev = (data.get("VOL_Web", {}).get("Page Impressions", {}).get("prev_sum", 0) + 
+                     data.get("VOL_App", {}).get("Page Impressions", {}).get("prev_sum", 0))
+    total_uc_prev = (data.get("VOL_Web", {}).get("Unique Clients", {}).get("prev_sum", 0) + 
+                     data.get("VOL_App", {}).get("Unique Clients", {}).get("prev_sum", 0))
+    
+    total_visits_mom = calc_mom(total_visits, total_visits_prev)
+    total_pi_mom = calc_mom(total_pi, total_pi_prev)
+    total_uc_mom = calc_mom(total_uc, total_uc_prev)
+    
+    # Gesamt YoY (gewichteter Durchschnitt aus Web + App)
+    total_visits_yoy = None
+    total_pi_yoy = None
+    if web["visits_yoy"] is not None and app["visits_yoy"] is not None:
+        # Gewichteter Durchschnitt
+        yoy_web_visits_prev = yoy_data.get("previous_year", {}).get("data", {}).get("VOL_Web", {}).get("Visits", 0)
+        yoy_app_visits_prev = yoy_data.get("previous_year", {}).get("data", {}).get("VOL_App", {}).get("Visits", 0)
+        yoy_total_prev = yoy_web_visits_prev + yoy_app_visits_prev
+        if yoy_total_prev > 0:
+            total_visits_yoy = (total_visits - yoy_total_prev) / yoy_total_prev
+    
+    if web["pi_yoy"] is not None and app["pi_yoy"] is not None:
+        yoy_web_pi_prev = yoy_data.get("previous_year", {}).get("data", {}).get("VOL_Web", {}).get("Page Impressions", 0)
+        yoy_app_pi_prev = yoy_data.get("previous_year", {}).get("data", {}).get("VOL_App", {}).get("Page Impressions", 0)
+        yoy_total_prev = yoy_web_pi_prev + yoy_app_pi_prev
+        if yoy_total_prev > 0:
+            total_pi_yoy = (total_pi - yoy_total_prev) / yoy_total_prev
+    
+    # === KPI-SEKTIONEN BAUEN ===
     
     # Farbe basierend auf Performance
     if total_pi_mom and total_pi_mom > 0:
@@ -864,86 +917,56 @@ def send_monthly_teams_report_v4(title: str, summary: str, data: Dict,
     else:
         color = "17A2B8"  # Blau (neutral)
     
-    # === SECTION 1: METADATEN + GESAMTSUMMARY (prominent) ===
+    # Metadaten
+    kpi_text = f"**📅 Berichtsmonat:** {current_month}\n"
+    kpi_text += f"**📊 MoM-Vergleich:** {prev_month}\n"
+    kpi_text += f"**📅 YoY-Vergleich:** {current_month.split()[0]} {int(current_month.split()[1]) - 1}\n\n"
+    kpi_text += "---\n\n"
     
-    # YoY für Gesamt berechnen
-    yoy_web_pi = yoy_changes.get("VOL_Web", {}).get("Page Impressions")
-    yoy_app_pi = yoy_changes.get("VOL_App", {}).get("Page Impressions")
-    yoy_ios_pi = yoy_changes.get("VOL_iOS", {}).get("Page Impressions")
-    yoy_android_pi = yoy_changes.get("VOL_Android", {}).get("Page Impressions")
+    # 1. GESAMTENTWICKLUNG
+    kpi_text += "**📊 GESAMTENTWICKLUNG**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', total_visits, total_visits_mom, total_visits_yoy)}\n"
+    kpi_text += f"• {format_metric_line('PI', total_pi, total_pi_mom, total_pi_yoy)}\n"
+    kpi_text += f"• {format_metric_line('UC', total_uc, total_uc_mom, None, is_uc=True)}\n"
+    kpi_text += f"• {format_metric_line('HPPI', total_hppi, web['hppi_mom'], web['hppi_yoy'])}\n\n"
     
-    summary_facts = [
-        # Metadaten
-        {"name": "📅 Berichtsmonat", "value": current_month},
-        {"name": "📊 MoM-Vergleich", "value": prev_month},
-        {"name": "📅 YoY-Vergleich", "value": f"{current_month.split()[0]} {int(current_month.split()[1]) - 1}"},
-        {"name": "═══════════════", "value": "═══════════════"},
-        # Gesamt-Performance
-        {"name": "📊 **GESAMT PI**", "value": f"**{total_pi:,}** ({format_change(total_pi_mom, 'MoM ')})"},
-        {"name": "📊 **GESAMT Visits**", "value": f"**{total_visits:,}** ({format_change(total_visits_mom, 'MoM ')})"},
-        {"name": "📱 **Plattform-Split**", "value": f"Web {web_share:.0f}% | App {app_share:.0f}%"},
-        {"name": "═══════════════", "value": "═══════════════"},
-        # Plattform-Detail
-        {"name": "📊 VOL Web PI", "value": f"{web_pi:,} (MoM: {format_change(data.get('VOL_Web', {}).get('Page Impressions', {}).get('mom_change'))} | YoY: {format_change(yoy_web_pi)})"},
-        {"name": "📊 VOL App PI", "value": f"{app_pi:,} (MoM: {format_change(data.get('VOL_App', {}).get('Page Impressions', {}).get('mom_change'))} | YoY: {format_change(yoy_app_pi)})"},
-        {"name": "═══════════════", "value": "═══════════════"},
-        # iOS/Android Detail (NEU)
-        {"name": "📱 **APP-AUFSCHLÜSSELUNG**", "value": f"iOS {ios_share:.0f}% | Android {android_share:.0f}%"},
-        {"name": "📱 VOL iOS PI", "value": f"{ios_pi:,} (MoM: {format_change(data.get('VOL_iOS', {}).get('Page Impressions', {}).get('mom_change'))} | YoY: {format_change(yoy_ios_pi)})"},
-        {"name": "📱 VOL Android PI", "value": f"{android_pi:,} (MoM: {format_change(data.get('VOL_Android', {}).get('Page Impressions', {}).get('mom_change'))} | YoY: {format_change(yoy_android_pi)})"},
-    ]
+    # 2. WEB-ENTWICKLUNG
+    kpi_text += "**🌐 WEB-ENTWICKLUNG**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', web['visits'], web['visits_mom'], web['visits_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('PI', web['pi'], web['pi_mom'], web['pi_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('UC', web['uc'], web['uc_mom'], None, is_uc=True)}\n"
+    kpi_text += f"• {format_metric_line('HPPI', web['hppi'], web['hppi_mom'], web['hppi_yoy'])}\n\n"
     
-    # === SECTION 2: PLATTFORM-DETAIL ===
-    detail_text = "**📊 PLATTFORM-DETAIL**\n\n"
+    # 3. APP-ENTWICKLUNG (Gesamt)
+    kpi_text += "**📱 APP-ENTWICKLUNG (Gesamt)**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', app['visits'], app['visits_mom'], app['visits_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('PI', app['pi'], app['pi_mom'], app['pi_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('UC', app['uc'], app['uc_mom'], None, is_uc=True)}\n\n"
     
-    for platform, key in [("🌐 VOL Web", "VOL_Web"), ("📱 VOL App (Gesamt)", "VOL_App")]:
-        if key in data:
-            pi = data[key].get("Page Impressions", {})
-            visits = data[key].get("Visits", {})
-            
-            pi_val = pi.get("current_sum", 0)
-            pi_mom = format_change(pi.get("mom_change"))
-            pi_yoy = format_change(yoy_changes.get(key, {}).get("Page Impressions"))
-            
-            visits_val = visits.get("current_sum", 0)
-            visits_mom = format_change(visits.get("mom_change"))
-            
-            detail_text += f"**{platform}**\n"
-            detail_text += f"• PI: {pi_val:,} (MoM: {pi_mom} | YoY: {pi_yoy})\n"
-            detail_text += f"• Visits: {visits_val:,} (MoM: {visits_mom})\n\n"
+    # 4. APP-ENTWICKLUNG (iOS)
+    kpi_text += "**🍎 APP-ENTWICKLUNG (iOS)**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', ios['visits'], ios['visits_mom'], ios['visits_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('PI', ios['pi'], ios['pi_mom'], ios['pi_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('UC', ios['uc'], ios['uc_mom'], None, is_uc=True)}\n\n"
     
-    # NEU: iOS/Android Detail
-    detail_text += "---\n\n**📱 APP-AUFSCHLÜSSELUNG (iOS/Android)**\n\n"
+    # 5. APP-ENTWICKLUNG (Android)
+    kpi_text += "**🤖 APP-ENTWICKLUNG (Android)**\n\n"
+    kpi_text += f"• {format_metric_line('Visits', android['visits'], android['visits_mom'], android['visits_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('PI', android['pi'], android['pi_mom'], android['pi_yoy'])}\n"
+    kpi_text += f"• {format_metric_line('UC', android['uc'], android['uc_mom'], None, is_uc=True)}\n\n"
     
-    for platform, key in [("🍎 VOL iOS", "VOL_iOS"), ("🤖 VOL Android", "VOL_Android")]:
-        if key in data:
-            pi = data[key].get("Page Impressions", {})
-            visits = data[key].get("Visits", {})
-            
-            pi_val = pi.get("current_sum", 0)
-            pi_mom = format_change(pi.get("mom_change"))
-            pi_yoy = format_change(yoy_changes.get(key, {}).get("Page Impressions"))
-            
-            visits_val = visits.get("current_sum", 0)
-            visits_mom = format_change(visits.get("mom_change"))
-            
-            detail_text += f"**{platform}**\n"
-            detail_text += f"• PI: {pi_val:,} (MoM: {pi_mom} | YoY: {pi_yoy})\n"
-            detail_text += f"• Visits: {visits_val:,} (MoM: {visits_mom})\n\n"
-    
-    # Hinweis UC
-    detail_text += "_⚠️ UC nicht vergleichbar (Methodenwechsel Juli 2025)_"
+    # Fußnote
+    kpi_text += "_*UC YoY nicht vergleichbar (Methodenwechsel Juli 2025)_"
     
     # === SECTIONS BAUEN ===
     sections = [
         {
             "activityTitle": title,
-            "activitySubtitle": "📢 VOL.AT Monatsbericht v4.0",
-            "facts": summary_facts,
+            "activitySubtitle": "📢 VOL.AT Monatsbericht v5.0",
             "markdown": True
         },
         {
-            "text": detail_text,
+            "text": kpi_text,
             "markdown": True
         },
         {
@@ -981,7 +1004,7 @@ def send_monthly_teams_report_v4(title: str, summary: str, data: Dict,
     try:
         response = requests.post(TEAMS_WEBHOOK_URL, json=card, timeout=30)
         if response.status_code == 200:
-            print("✅ Monatsbericht v4.0 an Teams gesendet")
+            print("✅ Monatsbericht v5.0 an Teams gesendet")
         else:
             print(f"⚠️ Teams Fehler: {response.status_code}")
             print(f"   Response: {response.text[:200]}")
