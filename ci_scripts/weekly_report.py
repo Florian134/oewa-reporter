@@ -858,42 +858,45 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
         color = "17A2B8"  # Blau (neutral)
     
     # === KPI-TEXT BAUEN (exakt wie Vorlage) ===
+    # WICHTIG: MS Teams benötigt <br> für echte Zeilenumbrüche!
+    BR = "<br>"  # HTML Line Break für MS Teams
+    
     kpi_text = ""
     
     # 1. Gesamtentwicklung (mit HPPI)
-    kpi_text += "**Gesamtentwicklung:**\n"
-    kpi_text += f"{format_metric_line('Visits', total_visits, total_visits_vs_prev, total_visits_vs_avg)}\n"
-    kpi_text += f"{format_metric_line('PI', total_pi, total_pi_vs_prev, total_pi_vs_avg)}\n"
-    kpi_text += f"{format_metric_line('UC', total_uc, total_uc_vs_prev, total_uc_vs_avg)}\n"
-    kpi_text += f"{format_metric_line('HPPI', total_hppi, web['hppi_vs_prev'], web['hppi_vs_avg'])}\n"
-    kpi_text += "\n"
+    kpi_text += f"**Gesamtentwicklung:**{BR}"
+    kpi_text += f"{format_metric_line('Visits', total_visits, total_visits_vs_prev, total_visits_vs_avg)}{BR}"
+    kpi_text += f"{format_metric_line('PI', total_pi, total_pi_vs_prev, total_pi_vs_avg)}{BR}"
+    kpi_text += f"{format_metric_line('UC', total_uc, total_uc_vs_prev, total_uc_vs_avg)}{BR}"
+    kpi_text += f"{format_metric_line('HPPI', total_hppi, web['hppi_vs_prev'], web['hppi_vs_avg'])}{BR}"
+    kpi_text += f"{BR}"
     
     # 2. Web-Entwicklung (mit HPPI)
-    kpi_text += "**Web-Entwicklung**\n"
-    kpi_text += f"{format_metric_line('Visits', web['visits'], web['visits_vs_prev'], web['visits_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('PI', web['pi'], web['pi_vs_prev'], web['pi_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('UC', web['uc'], web['uc_vs_prev'], web['uc_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('HPPI', web['hppi'], web['hppi_vs_prev'], web['hppi_vs_avg'])}\n"
-    kpi_text += "\n"
+    kpi_text += f"**Web-Entwicklung**{BR}"
+    kpi_text += f"{format_metric_line('Visits', web['visits'], web['visits_vs_prev'], web['visits_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', web['pi'], web['pi_vs_prev'], web['pi_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('UC', web['uc'], web['uc_vs_prev'], web['uc_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('HPPI', web['hppi'], web['hppi_vs_prev'], web['hppi_vs_avg'])}{BR}"
+    kpi_text += f"{BR}"
     
     # 3. App-Entwicklung (Gesamt) - OHNE HPPI
-    kpi_text += "**App-Entwicklung (Gesamt)**\n"
-    kpi_text += f"{format_metric_line('Visits', app['visits'], app['visits_vs_prev'], app['visits_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('PI', app['pi'], app['pi_vs_prev'], app['pi_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('UC', app['uc'], app['uc_vs_prev'], app['uc_vs_avg'])}\n"
-    kpi_text += "\n"
+    kpi_text += f"**App-Entwicklung (Gesamt)**{BR}"
+    kpi_text += f"{format_metric_line('Visits', app['visits'], app['visits_vs_prev'], app['visits_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', app['pi'], app['pi_vs_prev'], app['pi_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('UC', app['uc'], app['uc_vs_prev'], app['uc_vs_avg'])}{BR}"
+    kpi_text += f"{BR}"
     
     # 4. App-Entwicklung (iOS) - OHNE HPPI
-    kpi_text += "**App-Entwicklung (iOS)**\n"
-    kpi_text += f"{format_metric_line('Visits', ios['visits'], ios['visits_vs_prev'], ios['visits_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('PI', ios['pi'], ios['pi_vs_prev'], ios['pi_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('UC', ios['uc'], ios['uc_vs_prev'], ios['uc_vs_avg'])}\n"
-    kpi_text += "\n"
+    kpi_text += f"**App-Entwicklung (iOS)**{BR}"
+    kpi_text += f"{format_metric_line('Visits', ios['visits'], ios['visits_vs_prev'], ios['visits_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', ios['pi'], ios['pi_vs_prev'], ios['pi_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('UC', ios['uc'], ios['uc_vs_prev'], ios['uc_vs_avg'])}{BR}"
+    kpi_text += f"{BR}"
     
     # 5. App-Entwicklung (Android) - OHNE HPPI
-    kpi_text += "**App-Entwicklung (Android)**\n"
-    kpi_text += f"{format_metric_line('Visits', android['visits'], android['visits_vs_prev'], android['visits_vs_avg'])}\n"
-    kpi_text += f"{format_metric_line('PI', android['pi'], android['pi_vs_prev'], android['pi_vs_avg'])}\n"
+    kpi_text += f"**App-Entwicklung (Android)**{BR}"
+    kpi_text += f"{format_metric_line('Visits', android['visits'], android['visits_vs_prev'], android['visits_vs_avg'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', android['pi'], android['pi_vs_prev'], android['pi_vs_avg'])}{BR}"
     kpi_text += f"{format_metric_line('UC', android['uc'], android['uc_vs_prev'], android['uc_vs_avg'])}"
     
     # === SECTIONS BAUEN ===

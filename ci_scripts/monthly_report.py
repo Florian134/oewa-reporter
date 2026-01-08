@@ -934,42 +934,45 @@ def send_monthly_teams_report_v4(title: str, summary: str, data: Dict,
         color = "17A2B8"  # Blau (neutral)
     
     # === KPI-TEXT BAUEN (exakt wie Vorlage) ===
+    # WICHTIG: MS Teams benötigt <br> für echte Zeilenumbrüche!
+    BR = "<br>"  # HTML Line Break für MS Teams
+    
     kpi_text = ""
     
     # 1. Gesamtentwicklung (mit HPPI)
-    kpi_text += "**Gesamtentwicklung:**\n"
-    kpi_text += f"{format_metric_line('Visits', total_visits, total_visits_mom, total_visits_yoy)}\n"
-    kpi_text += f"{format_metric_line('PI', total_pi, total_pi_mom, total_pi_yoy)}\n"
-    kpi_text += f"{format_metric_line('UC', total_uc, total_uc_mom, None, is_uc=True)}\n"
-    kpi_text += f"{format_metric_line('HPPI', total_hppi, web['hppi_mom'], web['hppi_yoy'])}\n"
-    kpi_text += "\n"
+    kpi_text += f"**Gesamtentwicklung:**{BR}"
+    kpi_text += f"{format_metric_line('Visits', total_visits, total_visits_mom, total_visits_yoy)}{BR}"
+    kpi_text += f"{format_metric_line('PI', total_pi, total_pi_mom, total_pi_yoy)}{BR}"
+    kpi_text += f"{format_metric_line('UC', total_uc, total_uc_mom, None, is_uc=True)}{BR}"
+    kpi_text += f"{format_metric_line('HPPI', total_hppi, web['hppi_mom'], web['hppi_yoy'])}{BR}"
+    kpi_text += f"{BR}"
     
     # 2. Web-Entwicklung (mit HPPI)
-    kpi_text += "**Web-Entwicklung**\n"
-    kpi_text += f"{format_metric_line('Visits', web['visits'], web['visits_mom'], web['visits_yoy'])}\n"
-    kpi_text += f"{format_metric_line('PI', web['pi'], web['pi_mom'], web['pi_yoy'])}\n"
-    kpi_text += f"{format_metric_line('UC', web['uc'], web['uc_mom'], None, is_uc=True)}\n"
-    kpi_text += f"{format_metric_line('HPPI', web['hppi'], web['hppi_mom'], web['hppi_yoy'])}\n"
-    kpi_text += "\n"
+    kpi_text += f"**Web-Entwicklung**{BR}"
+    kpi_text += f"{format_metric_line('Visits', web['visits'], web['visits_mom'], web['visits_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', web['pi'], web['pi_mom'], web['pi_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('UC', web['uc'], web['uc_mom'], None, is_uc=True)}{BR}"
+    kpi_text += f"{format_metric_line('HPPI', web['hppi'], web['hppi_mom'], web['hppi_yoy'])}{BR}"
+    kpi_text += f"{BR}"
     
     # 3. App-Entwicklung (Gesamt) - OHNE HPPI
-    kpi_text += "**App-Entwicklung (Gesamt)**\n"
-    kpi_text += f"{format_metric_line('Visits', app['visits'], app['visits_mom'], app['visits_yoy'])}\n"
-    kpi_text += f"{format_metric_line('PI', app['pi'], app['pi_mom'], app['pi_yoy'])}\n"
-    kpi_text += f"{format_metric_line('UC', app['uc'], app['uc_mom'], None, is_uc=True)}\n"
-    kpi_text += "\n"
+    kpi_text += f"**App-Entwicklung (Gesamt)**{BR}"
+    kpi_text += f"{format_metric_line('Visits', app['visits'], app['visits_mom'], app['visits_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', app['pi'], app['pi_mom'], app['pi_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('UC', app['uc'], app['uc_mom'], None, is_uc=True)}{BR}"
+    kpi_text += f"{BR}"
     
     # 4. App-Entwicklung (iOS) - OHNE HPPI
-    kpi_text += "**App-Entwicklung (iOS)**\n"
-    kpi_text += f"{format_metric_line('Visits', ios['visits'], ios['visits_mom'], ios['visits_yoy'])}\n"
-    kpi_text += f"{format_metric_line('PI', ios['pi'], ios['pi_mom'], ios['pi_yoy'])}\n"
-    kpi_text += f"{format_metric_line('UC', ios['uc'], ios['uc_mom'], None, is_uc=True)}\n"
-    kpi_text += "\n"
+    kpi_text += f"**App-Entwicklung (iOS)**{BR}"
+    kpi_text += f"{format_metric_line('Visits', ios['visits'], ios['visits_mom'], ios['visits_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', ios['pi'], ios['pi_mom'], ios['pi_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('UC', ios['uc'], ios['uc_mom'], None, is_uc=True)}{BR}"
+    kpi_text += f"{BR}"
     
     # 5. App-Entwicklung (Android) - OHNE HPPI
-    kpi_text += "**App-Entwicklung (Android)**\n"
-    kpi_text += f"{format_metric_line('Visits', android['visits'], android['visits_mom'], android['visits_yoy'])}\n"
-    kpi_text += f"{format_metric_line('PI', android['pi'], android['pi_mom'], android['pi_yoy'])}\n"
+    kpi_text += f"**App-Entwicklung (Android)**{BR}"
+    kpi_text += f"{format_metric_line('Visits', android['visits'], android['visits_mom'], android['visits_yoy'])}{BR}"
+    kpi_text += f"{format_metric_line('PI', android['pi'], android['pi_mom'], android['pi_yoy'])}{BR}"
     kpi_text += f"{format_metric_line('UC', android['uc'], android['uc_mom'], None, is_uc=True)}"
     
     # === SECTIONS BAUEN ===
