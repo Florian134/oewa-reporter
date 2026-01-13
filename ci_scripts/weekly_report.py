@@ -1086,12 +1086,13 @@ def run_weekly_report():
                     image_urls["Änderungen-Übersicht (%)"] = url
             
             # 6. Plattform-Anteil Pie (NEU - analog Monthly)
-            pie_chart = create_platform_pie_chart(data, "Page Impressions")
+            # GEÄNDERT: Visits statt Page Impressions für besseren Vergleich
+            pie_chart = create_platform_pie_chart(data, "Visits")
             if pie_chart:
-                print("   → Plattform-Anteil erstellt")
+                print("   → Plattform-Anteil (Visits) erstellt")
                 url = upload_to_imgbb(pie_chart)
                 if url:
-                    image_urls["Web vs. App Anteil"] = url
+                    image_urls["Web vs. App Visits"] = url
             
             print(f"\n   ✅ {len(image_urls)} Diagramme erfolgreich hochgeladen")
                     
