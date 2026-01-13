@@ -46,6 +46,7 @@ except ImportError:
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in CI/CD Variables gesetzt sein
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
+TEAMS_WEBHOOK_URL_WEEKLY_SECONDARY = os.environ.get("TEAMS_WEBHOOK_URL_WEEKLY_SECONDARY", "")  # Zusätzlicher Teams Channel für Weekly Reports
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "")
 
@@ -940,14 +941,30 @@ def send_teams_report(title: str, summary: str, data: Dict, period: str, image_u
         }]
     }
     
-    try:
-        response = requests.post(TEAMS_WEBHOOK_URL, json=card, timeout=30)
-        if response.status_code == 200:
-            print("✅ Wochenbericht v5.0 an Teams gesendet")
-        else:
-            print(f"⚠️ Teams Fehler: {response.status_code}")
-    except Exception as e:
-        print(f"⚠️ Teams Fehler: {e}")
+    # === SENDEN (an alle konfigurierten Webhooks) ===
+    webhooks = []
+    if TEAMS_WEBHOOK_URL:
+        webhooks.append(("Primär", TEAMS_WEBHOOK_URL))
+    if TEAMS_WEBHOOK_URL_WEEKLY_SECONDARY:
+        webhooks.append(("Sekundär", TEAMS_WEBHOOK_URL_WEEKLY_SECONDARY))
+    
+    if not webhooks:
+        print("⚠️ Keine TEAMS_WEBHOOK_URL konfiguriert")
+        return
+    
+    success_count = 0
+    for webhook_name, webhook_url in webhooks:
+        try:
+            response = requests.post(webhook_url, json=card, timeout=30)
+            if response.status_code == 200:
+                print(f"✅ Wochenbericht v5.0 an Teams gesendet ({webhook_name})")
+                success_count += 1
+            else:
+                print(f"⚠️ Teams Fehler ({webhook_name}): {response.status_code}")
+        except Exception as e:
+            print(f"⚠️ Teams Fehler ({webhook_name}): {e}")
+    
+    print(f"📤 Report an {success_count}/{len(webhooks)} Channels gesendet")
 
 
 # =============================================================================
