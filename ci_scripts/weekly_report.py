@@ -286,6 +286,7 @@ def create_6week_comparison_chart(weekly_data: Dict, metric: str = "Page Impress
     """
     Erstellt ein Balkendiagramm mit 7 Wochen (aktuelle + 6 Vorwochen).
     Zeigt die prozentuelle Veränderung.
+    CHRONOLOGISCH: Älteste Woche links, neueste rechts.
     """
     if not PLOTLY_AVAILABLE:
         return None
@@ -297,7 +298,9 @@ def create_6week_comparison_chart(weekly_data: Dict, metric: str = "Page Impress
         key = f"VOL_{surface}"
         if key in weekly_data:
             weeks_data = weekly_data[key].get(metric, {}).get("weekly_values", [])
-            for week_info in weeks_data:
+            # CHRONOLOGISCH: Liste umkehren (älteste zuerst, neueste zuletzt)
+            weeks_data_sorted = list(reversed(weeks_data))
+            for week_info in weeks_data_sorted:
                 chart_data.append({
                     "woche": week_info["label"],
                     "wert": week_info["value"],
