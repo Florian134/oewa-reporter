@@ -1254,12 +1254,13 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
                     image_urls["Web vs. App Visits"] = url
             
             # 8. NEU: App-Split Pie (iOS vs. Android)
-            app_split_chart = create_app_split_pie_chart(data, "Page Impressions")
+            # GEÄNDERT: Visits statt Page Impressions für besseren Vergleich
+            app_split_chart = create_app_split_pie_chart(data, "Visits")
             if app_split_chart:
-                print("   → App-Split (iOS/Android) erstellt")
+                print("   → App-Split (iOS/Android Visits) erstellt")
                 url = upload_to_imgbb(app_split_chart)
                 if url:
-                    image_urls["iOS vs. Android Anteil"] = url
+                    image_urls["iOS vs. Android Visits"] = url
             
             print(f"\n   ✅ {len(image_urls)} Diagramme erfolgreich hochgeladen")
                     
