@@ -1245,12 +1245,13 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
                     image_urls["MoM-Übersicht"] = url
             
             # 7. Plattform-Anteil Pie (Web vs. App)
-            pie_chart = create_platform_pie_chart(data, "Page Impressions")
+            # GEÄNDERT: Visits statt Page Impressions für besseren Vergleich
+            pie_chart = create_platform_pie_chart(data, "Visits")
             if pie_chart:
-                print("   → Plattform-Anteil erstellt")
+                print("   → Plattform-Anteil (Visits) erstellt")
                 url = upload_to_imgbb(pie_chart)
                 if url:
-                    image_urls["Web vs. App Anteil"] = url
+                    image_urls["Web vs. App Visits"] = url
             
             # 8. NEU: App-Split Pie (iOS vs. Android)
             app_split_chart = create_app_split_pie_chart(data, "Page Impressions")
