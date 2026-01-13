@@ -994,6 +994,7 @@ def run_weekly_report():
     print("\n🔧 KONFIGURATION:")
     print(f"   AIRTABLE_API_KEY: {'✅' if AIRTABLE_API_KEY else '❌'}")
     print(f"   TEAMS_WEBHOOK_URL: {'✅' if TEAMS_WEBHOOK_URL else '❌'}")
+    print(f"   TEAMS_WEBHOOK_URL_WEEKLY_SECONDARY: {'✅' if TEAMS_WEBHOOK_URL_WEEKLY_SECONDARY else '❌ (nicht gesetzt)'}")
     print(f"   OPENAI_API_KEY: {'✅' if OPENAI_API_KEY else '⚠️'}")
     print(f"   IMGBB_API_KEY: {'✅' if IMGBB_API_KEY else '❌'}")
     print(f"   PLOTLY_AVAILABLE: {'✅' if PLOTLY_AVAILABLE else '❌'}")
