@@ -70,6 +70,7 @@ except ImportError:
 AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")  # Muss in CI/CD Variables gesetzt sein
 TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
+TEAMS_WEBHOOK_URL_SECONDARY = os.environ.get("TEAMS_WEBHOOK_URL_SECONDARY", "")  # Zusätzlicher Teams Channel
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "")
 
@@ -1017,16 +1018,31 @@ def send_monthly_teams_report_v4(title: str, summary: str, data: Dict,
         }]
     }
     
-    # === SENDEN ===
-    try:
-        response = requests.post(TEAMS_WEBHOOK_URL, json=card, timeout=30)
-        if response.status_code == 200:
-            print("✅ Monatsbericht v5.0 an Teams gesendet")
-        else:
-            print(f"⚠️ Teams Fehler: {response.status_code}")
-            print(f"   Response: {response.text[:200]}")
-    except Exception as e:
-        print(f"⚠️ Teams Fehler: {e}")
+    # === SENDEN (an alle konfigurierten Webhooks) ===
+    webhooks = []
+    if TEAMS_WEBHOOK_URL:
+        webhooks.append(("Primär", TEAMS_WEBHOOK_URL))
+    if TEAMS_WEBHOOK_URL_SECONDARY:
+        webhooks.append(("Sekundär", TEAMS_WEBHOOK_URL_SECONDARY))
+    
+    if not webhooks:
+        print("⚠️ Keine TEAMS_WEBHOOK_URL konfiguriert")
+        return
+    
+    success_count = 0
+    for webhook_name, webhook_url in webhooks:
+        try:
+            response = requests.post(webhook_url, json=card, timeout=30)
+            if response.status_code == 200:
+                print(f"✅ Monatsbericht v5.0 an Teams gesendet ({webhook_name})")
+                success_count += 1
+            else:
+                print(f"⚠️ Teams Fehler ({webhook_name}): {response.status_code}")
+                print(f"   Response: {response.text[:200]}")
+        except Exception as e:
+            print(f"⚠️ Teams Fehler ({webhook_name}): {e}")
+    
+    print(f"📤 Report an {success_count}/{len(webhooks)} Channels gesendet")
 
 
 # =============================================================================
