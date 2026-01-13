@@ -202,8 +202,8 @@ weekly_report:
   stage: run
   image: python:3.11-slim
   before_script:
-    # Git für Chart-Push installieren
-    - apt-get update && apt-get install -y git
+    # Git + Chromium für Chart-Push und Kaleido installieren
+    - apt-get update && apt-get install -y git chromium
     - git config --global user.email "ci@oewa-reporter.gitlab.io"
     - git config --global user.name "ÖWA Reporter CI"
   script:
@@ -235,6 +235,9 @@ weekly_report:
 monthly_report:
   stage: run
   image: python:3.11-slim
+  before_script:
+    # Chromium für Kaleido Chart-Generierung installieren
+    - apt-get update && apt-get install -y chromium
   script:
     - echo "📊 ÖWA Reporter - Monthly Report v1.0"
     - pip install --upgrade pip
