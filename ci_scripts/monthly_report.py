@@ -73,6 +73,23 @@ TEAMS_WEBHOOK_URL = os.environ.get("TEAMS_WEBHOOK_URL", "")
 TEAMS_WEBHOOK_URL_SECONDARY = os.environ.get("TEAMS_WEBHOOK_URL_SECONDARY", "")  # Zusätzlicher Teams Channel
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "")
+INFONLINE_API_KEY = os.environ.get("INFONLINE_API_KEY", "")  # Für direkte API-Abfragen
+
+# =============================================================================
+# INFONLINE API KONFIGURATION (für offizielle Monatswerte)
+# =============================================================================
+INFONLINE_SITES = {
+    "Web": {"site_id": "at_w_atvol", "name": "VOL.AT Web"},
+    "iOS": {"site_id": "at_i_volat", "name": "VOL.AT iOS"},
+    "Android": {"site_id": "at_a_volat", "name": "VOL.AT Android"},
+    "Homepage": {"site_id": "BE000072", "name": "VOL.AT Homepage"},
+}
+
+INFONLINE_METRICS = {
+    "pageimpressions": {"api_field": "pis", "display_name": "Page Impressions"},
+    "visits": {"api_field": "visits", "display_name": "Visits"},
+    "uniqueclients": {"api_field": "uclients", "display_name": "Unique Clients"},
+}
 
 # Chart-Größe (optimiert für Teams)
 CHART_WIDTH = 1200  # Reduziert für schnelleren Upload
@@ -121,6 +138,150 @@ def get_previous_month(year: int, month: int) -> tuple:
     if month == 1:
         return year - 1, 12
     return year, month - 1
+
+
+# =============================================================================
+# INFONLINE API DIREKTABFRAGE (für offizielle Monatswerte)
+# =============================================================================
+
+def fetch_infonline_monthly(site_id: str, metric: str, year: int, month: int) -> dict:
+    """
+    Ruft offizielle Monatsdaten von der INFOnline API ab.
+    Verwendet aggregation=MONTH für die offiziellen ÖWA-Werte.
+    
+    Args:
+        site_id: INFOnline Site-ID (z.B. "at_w_atvol")
+        metric: Metrik (pageimpressions, visits, uniqueclients)
+        year: Jahr
+        month: Monat
+    
+    Returns:
+        dict mit success, value, preliminary
+    """
+    if not INFONLINE_API_KEY:
+        return {"success": False, "error": "INFONLINE_API_KEY nicht gesetzt"}
+    
+    target_date = date(year, month, 1)
+    
+    url = f"https://reportingapi.infonline.de/api/v1/{metric}"
+    params = {
+        "site": site_id,
+        "date": target_date.isoformat(),
+        "aggregation": "MONTH"  # WICHTIG: Offizielle Monatswerte!
+    }
+    headers = {
+        "authorization": INFONLINE_API_KEY,
+        "Accept": "application/json"
+    }
+    
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            # IOM-Daten (hochgerechneter offizieller Wert) extrahieren
+            if "iom" in data and len(data["iom"]) > 0:
+                iom = data["iom"][0]
+                api_field = INFONLINE_METRICS.get(metric, {}).get("api_field", metric)
+                value = iom.get(api_field, 0)
+                preliminary = iom.get("preliminary", False)
+                return {"success": True, "value": value, "preliminary": preliminary}
+            return {"success": False, "error": "Keine IOM-Daten"}
+        elif response.status_code == 404:
+            return {"success": False, "error": "Keine Daten verfügbar"}
+        else:
+            return {"success": False, "error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def fetch_all_monthly_data_from_api(year: int, month: int) -> Dict:
+    """
+    Ruft ALLE Monatsdaten für VOL.AT direkt von der INFOnline API ab.
+    Gibt Daten im gleichen Format zurück wie get_monthly_data().
+    
+    Returns:
+        Dict im Format:
+        {
+            "VOL_Web": {"Page Impressions": 40000000, "Visits": 13000000, ...},
+            "VOL_iOS": {...},
+            "VOL_Android": {...},
+            "VOL_App": {...}  # iOS + Android aggregiert
+        }
+    """
+    print(f"   📡 Rufe offizielle Monatswerte von INFOnline API ab...")
+    
+    result = {}
+    
+    for platform, site_info in INFONLINE_SITES.items():
+        site_id = site_info["site_id"]
+        key = f"VOL_{platform}"
+        result[key] = {}
+        
+        # Homepage hat nur Page Impressions
+        metrics_to_fetch = ["pageimpressions"] if platform == "Homepage" else list(INFONLINE_METRICS.keys())
+        
+        for metric in metrics_to_fetch:
+            api_result = fetch_infonline_monthly(site_id, metric, year, month)
+            
+            if api_result.get("success"):
+                display_name = INFONLINE_METRICS.get(metric, {}).get("display_name", metric)
+                if platform == "Homepage" and metric == "pageimpressions":
+                    display_name = "Homepage PI"
+                result[key][display_name] = api_result["value"]
+            else:
+                print(f"      ⚠️ {platform}/{metric}: {api_result.get('error', 'Fehler')}")
+        
+        # Kurze Pause für Rate Limiting
+        time.sleep(0.1)
+    
+    # App-Daten aggregieren (iOS + Android)
+    if "VOL_iOS" in result and "VOL_Android" in result:
+        result["VOL_App"] = {}
+        for metric in ["Page Impressions", "Visits", "Unique Clients"]:
+            ios_val = result["VOL_iOS"].get(metric, 0)
+            android_val = result["VOL_Android"].get(metric, 0)
+            if ios_val > 0 or android_val > 0:
+                result["VOL_App"][metric] = ios_val + android_val
+    
+    # Homepage PI zu Web hinzufügen (falls vorhanden)
+    if "VOL_Homepage" in result and "Homepage PI" in result["VOL_Homepage"]:
+        if "VOL_Web" in result:
+            result["VOL_Web"]["Homepage PI"] = result["VOL_Homepage"]["Homepage PI"]
+    
+    # Statistik ausgeben
+    for key in ["VOL_Web", "VOL_App", "VOL_iOS", "VOL_Android"]:
+        if key in result:
+            pi = result[key].get("Page Impressions", 0)
+            visits = result[key].get("Visits", 0)
+            print(f"      ✓ {key}: PI={pi:,}, Visits={visits:,}")
+    
+    return result
+
+
+def fetch_monthly_comparison_from_api(year: int, month: int) -> Tuple[Dict, Dict, Dict]:
+    """
+    Ruft aktuelle, Vormonats- und Vorjahres-Daten von der INFOnline API ab.
+    Berechnet MOM und YOY Änderungen.
+    
+    Returns:
+        Tuple: (current_data, prev_month_data, prev_year_data)
+    """
+    print(f"\n📥 Lade Monatsdaten direkt von INFOnline API...")
+    
+    # Aktueller Monat
+    print(f"   → Aktueller Monat: {month:02d}/{year}")
+    current_data = fetch_all_monthly_data_from_api(year, month)
+    
+    # Vormonat
+    prev_year, prev_month = get_previous_month(year, month)
+    print(f"   → Vormonat: {prev_month:02d}/{prev_year}")
+    prev_month_data = fetch_all_monthly_data_from_api(prev_year, prev_month)
+    
+    # Vorjahr (gleicher Monat)
+    print(f"   → Vorjahr: {month:02d}/{year - 1}")
+    prev_year_data = fetch_all_monthly_data_from_api(year - 1, month)
+    
+    return current_data, prev_month_data, prev_year_data
 
 
 def format_number(n: float) -> str:
@@ -1051,28 +1212,27 @@ def send_monthly_teams_report_v4(title: str, summary: str, data: Dict,
 
 def run_monthly_report(target_year: int = None, target_month: int = None):
     """
-    Hauptfunktion für den Monatsbericht v4.0.
+    Hauptfunktion für den Monatsbericht v5.0.
     
-    v4.0 FEATURES:
+    v5.0 FEATURES:
+    - DIREKTE INFOnline API-Abfrage (offizielle ÖWA-Werte)
     - Prominente Summary mit Gesamtmetriken
     - Bulletpoint-basierte KI-Analyse
     - Robuster Image Upload
     - Vollständige Metrik-Darstellung
     """
     print("=" * 70)
-    print("📊 ÖWA MONTHLY REPORT v4.2")
+    print("📊 ÖWA MONTHLY REPORT v5.0")
+    print("   • DIREKTE INFOnline API (offizielle Monatswerte)")
     print("   • Prominente Summary")
     print("   • Bulletpoint-Format")
     print("   • 7 Diagramme (analog Weekly Report)")
-    print("   • Robuster Image Upload")
     print("=" * 70)
     
-    if not AIRTABLE_API_KEY:
-        print("❌ AIRTABLE_API_KEY nicht gesetzt!")
-        return
-    
-    if not MONTHLY_UTILS_AVAILABLE:
-        print("❌ monthly_data_utils nicht verfügbar!")
+    # API-Key Prüfung: INFOnline API ist jetzt erforderlich
+    if not INFONLINE_API_KEY:
+        print("❌ INFONLINE_API_KEY nicht gesetzt!")
+        print("   Dieser API-Key ist erforderlich für offizielle Monatswerte.")
         return
     
     # Monat bestimmen
@@ -1095,55 +1255,55 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
     print(f"📊 YoY-Vergleich: {month_names[month]} {year - 1}")
     
     # ==========================================================================
-    # DATEN LADEN
+    # DATEN LADEN (DIREKT VON INFONLINE API)
     # ==========================================================================
-    print("\n📥 Lade VOL-Daten...")
+    current_data_raw, prev_data_raw, prev_year_data_raw = fetch_monthly_comparison_from_api(year, month)
     
-    # Aggregierte Daten (Web + App)
-    current_data = get_monthly_data(year, month, brand_filter="VOL", aggregate_app=True)
-    print(f"   → {current_month_str}: {len(current_data)} Gruppen (aggregiert)")
-    
-    prev_data = get_monthly_data(prev_year, prev_month, brand_filter="VOL", aggregate_app=True)
-    print(f"   → {prev_month_str}: {len(prev_data)} Gruppen (aggregiert)")
-    
-    # NEU: Separate iOS/Android-Daten
-    print("\n📱 Lade iOS/Android-Daten (separat)...")
-    current_data_separate = get_monthly_data(year, month, brand_filter="VOL", aggregate_app=False)
-    prev_data_separate = get_monthly_data(prev_year, prev_month, brand_filter="VOL", aggregate_app=False)
-    
-    # iOS/Android aus separaten Daten extrahieren
-    for platform in ["iOS", "Android"]:
-        key = f"VOL_{platform}"
-        if key in current_data_separate:
-            current_data[key] = current_data_separate[key]
-            print(f"   → {key}: {sum(current_data[key].values()):,} PI+Visits+UC")
-        if key in prev_data_separate:
-            prev_data[key] = prev_data_separate[key]
-    
-    print("\n📊 Lade YoY-Daten...")
-    yoy_data = get_yoy_comparison(year, month, brand_filter="VOL", aggregate_app=True)
-    
-    # NEU: YoY auch für iOS/Android separat
-    yoy_data_separate = get_yoy_comparison(year, month, brand_filter="VOL", aggregate_app=False)
-    if "yoy_changes" in yoy_data_separate:
-        for platform in ["iOS", "Android"]:
-            key = f"VOL_{platform}"
-            if key in yoy_data_separate["yoy_changes"]:
-                if "yoy_changes" not in yoy_data:
-                    yoy_data["yoy_changes"] = {}
-                yoy_data["yoy_changes"][key] = yoy_data_separate["yoy_changes"][key]
-    
-    print("\n📈 Lade 12-Monats-Trend...")
-    trend_data = get_12_month_trend(year, month, brand_filter="VOL", aggregate_app=True)
-    print(f"   → {len(trend_data)} Monate geladen (aggregiert)")
-    
-    # NEU: Trend auch für iOS/Android separat
-    trend_data_separate = get_12_month_trend(year, month, brand_filter="VOL", aggregate_app=False)
-    print(f"   → {len(trend_data_separate)} Monate geladen (iOS/Android separat)")
-    
-    if not current_data:
+    if not current_data_raw:
         print("❌ Keine Daten für aktuellen Monat!")
         return
+    
+    # YoY-Daten strukturieren
+    yoy_data = {
+        "current": {"year": year, "month": month, "data": current_data_raw},
+        "previous_year": {"year": year - 1, "month": month, "data": prev_year_data_raw},
+        "yoy_changes": {}
+    }
+    
+    # YoY-Änderungen berechnen
+    for key in current_data_raw:
+        if key in prev_year_data_raw:
+            yoy_data["yoy_changes"][key] = {}
+            for metric in current_data_raw[key]:
+                current_val = current_data_raw[key][metric]
+                prev_val = prev_year_data_raw.get(key, {}).get(metric, 0)
+                if prev_val > 0:
+                    yoy_data["yoy_changes"][key][metric] = (current_val - prev_val) / prev_val
+                else:
+                    yoy_data["yoy_changes"][key][metric] = None
+    
+    # 12-Monats-Trend (optional, nur wenn Airtable verfügbar)
+    trend_data = []
+    trend_data_separate = []
+    if MONTHLY_UTILS_AVAILABLE and AIRTABLE_API_KEY:
+        print("\n📈 Lade 12-Monats-Trend (für Diagramme)...")
+        try:
+            trend_data = get_12_month_trend(year, month, brand_filter="VOL", aggregate_app=True)
+            print(f"   → {len(trend_data)} Monate geladen (aggregiert)")
+            trend_data_separate = get_12_month_trend(year, month, brand_filter="VOL", aggregate_app=False)
+            print(f"   → {len(trend_data_separate)} Monate geladen (iOS/Android separat)")
+        except Exception as e:
+            print(f"   ⚠️ Trend-Daten nicht verfügbar: {e}")
+    else:
+        print("\n📈 12-Monats-Trend übersprungen (Airtable nicht verfügbar)")
+    
+    # ==========================================================================
+    # DATEN FÜR REPORT AUFBEREITEN
+    # ==========================================================================
+    # Struktur für send_monthly_teams_report_v4 vorbereiten
+    # Format: {key: {metric: {"current_sum": X, "prev_sum": Y, "mom_change": Z}}}
+    current_data = current_data_raw
+    prev_data = prev_data_raw
     
     # ==========================================================================
     # DATEN VERARBEITEN
@@ -1164,11 +1324,18 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
             }
     
     # Statistiken ausgeben
-    print("\n   === GESAMT-ÜBERSICHT ===")
-    total_pi = sum(data.get(k, {}).get("Page Impressions", {}).get("current_sum", 0) for k in data)
-    total_visits = sum(data.get(k, {}).get("Visits", {}).get("current_sum", 0) for k in data)
-    print(f"   • PI Gesamt: {total_pi:,}")
-    print(f"   • Visits Gesamt: {total_visits:,}")
+    print("\n   === GESAMT-ÜBERSICHT (offizielle INFOnline-Werte) ===")
+    # Nur Web + App zählen (nicht iOS/Android einzeln, da diese in App enthalten sind)
+    web_pi = data.get("VOL_Web", {}).get("Page Impressions", {}).get("current_sum", 0)
+    app_pi = data.get("VOL_App", {}).get("Page Impressions", {}).get("current_sum", 0)
+    web_visits = data.get("VOL_Web", {}).get("Visits", {}).get("current_sum", 0)
+    app_visits = data.get("VOL_App", {}).get("Visits", {}).get("current_sum", 0)
+    total_pi = web_pi + app_pi
+    total_visits = web_visits + app_visits
+    print(f"   • PI Gesamt (Web + App): {total_pi:,}")
+    print(f"   • Visits Gesamt (Web + App): {total_visits:,}")
+    print(f"   • Web PI: {web_pi:,} | App PI: {app_pi:,}")
+    print(f"   • Web Visits: {web_visits:,} | App Visits: {app_visits:,}")
     
     for key in sorted(data.keys()):
         print(f"\n   {key}:")
