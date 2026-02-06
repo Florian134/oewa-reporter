@@ -207,10 +207,21 @@ def fetch_all_monthly_data_from_api(year: int, month: int) -> Dict:
             "VOL_Android": {...},
             "VOL_App": {...}  # iOS + Android aggregiert
         }
+        
+        Oder leeres Dict {} wenn API nicht erreichbar
     """
     print(f"   📡 Rufe offizielle Monatswerte von INFOnline API ab...")
     
+    # Prüfe ob API-Key vorhanden
+    if not INFONLINE_API_KEY:
+        print(f"      ❌ INFONLINE_API_KEY nicht gesetzt!")
+        return {}
+    
+    print(f"      API-Key vorhanden: {INFONLINE_API_KEY[:10]}...{INFONLINE_API_KEY[-4:]}")
+    
     result = {}
+    api_errors = []
+    api_successes = 0
     
     for platform, site_info in INFONLINE_SITES.items():
         site_id = site_info["site_id"]
@@ -228,11 +239,24 @@ def fetch_all_monthly_data_from_api(year: int, month: int) -> Dict:
                 if platform == "Homepage" and metric == "pageimpressions":
                     display_name = "Homepage PI"
                 result[key][display_name] = api_result["value"]
+                api_successes += 1
             else:
-                print(f"      ⚠️ {platform}/{metric}: {api_result.get('error', 'Fehler')}")
+                error_msg = f"{platform}/{metric}: {api_result.get('error', 'Unbekannter Fehler')}"
+                api_errors.append(error_msg)
+                print(f"      ⚠️ {error_msg}")
         
         # Kurze Pause für Rate Limiting
         time.sleep(0.1)
+    
+    # Prüfe ob überhaupt Daten abgerufen wurden
+    if api_successes == 0:
+        print(f"\n      ❌ KRITISCH: Keine einzige API-Abfrage erfolgreich!")
+        print(f"      Fehler: {len(api_errors)}")
+        for err in api_errors[:5]:
+            print(f"         - {err}")
+        return {}  # Leeres Dict zurückgeben
+    
+    print(f"      ✓ {api_successes} API-Abfragen erfolgreich, {len(api_errors)} Fehler")
     
     # App-Daten aggregieren (iOS + Android)
     if "VOL_iOS" in result and "VOL_Android" in result:
@@ -249,11 +273,15 @@ def fetch_all_monthly_data_from_api(year: int, month: int) -> Dict:
             result["VOL_Web"]["Homepage PI"] = result["VOL_Homepage"]["Homepage PI"]
     
     # Statistik ausgeben
+    print(f"\n      === API-Ergebnisse für {month:02d}/{year} ===")
     for key in ["VOL_Web", "VOL_App", "VOL_iOS", "VOL_Android"]:
-        if key in result:
+        if key in result and result[key]:
             pi = result[key].get("Page Impressions", 0)
             visits = result[key].get("Visits", 0)
-            print(f"      ✓ {key}: PI={pi:,}, Visits={visits:,}")
+            uc = result[key].get("Unique Clients", 0)
+            print(f"      {key}: PI={pi:,}, Visits={visits:,}, UC={uc:,}")
+        else:
+            print(f"      {key}: KEINE DATEN")
     
     return result
 
@@ -1255,13 +1283,54 @@ def run_monthly_report(target_year: int = None, target_month: int = None):
     print(f"📊 YoY-Vergleich: {month_names[month]} {year - 1}")
     
     # ==========================================================================
-    # DATEN LADEN (DIREKT VON INFONLINE API)
+    # DATEN LADEN (DIREKT VON INFONLINE API, mit Airtable-Fallback)
     # ==========================================================================
     current_data_raw, prev_data_raw, prev_year_data_raw = fetch_monthly_comparison_from_api(year, month)
     
-    if not current_data_raw:
-        print("❌ Keine Daten für aktuellen Monat!")
-        return
+    # Prüfe ob API-Daten vorhanden sind
+    web_pi = current_data_raw.get("VOL_Web", {}).get("Page Impressions", 0)
+    
+    if not current_data_raw or web_pi == 0:
+        print("\n⚠️ INFOnline API liefert keine Daten - versuche Airtable-Fallback...")
+        
+        # Fallback auf Airtable (alte Methode)
+        if MONTHLY_UTILS_AVAILABLE and AIRTABLE_API_KEY:
+            print("   📦 Lade Daten aus Airtable...")
+            
+            from monthly_data_utils import get_monthly_data as airtable_get_monthly_data
+            
+            # Aktueller Monat
+            current_data_raw = airtable_get_monthly_data(year, month, brand_filter="VOL", aggregate_app=False)
+            print(f"      → Aktueller Monat: {len(current_data_raw)} Plattformen")
+            
+            # Vormonat
+            prev_data_raw = airtable_get_monthly_data(prev_year, prev_month, brand_filter="VOL", aggregate_app=False)
+            print(f"      → Vormonat: {len(prev_data_raw)} Plattformen")
+            
+            # Vorjahr
+            prev_year_data_raw = airtable_get_monthly_data(year - 1, month, brand_filter="VOL", aggregate_app=False)
+            print(f"      → Vorjahr: {len(prev_year_data_raw)} Plattformen")
+            
+            # App aggregieren
+            for data_dict in [current_data_raw, prev_data_raw, prev_year_data_raw]:
+                if "VOL_iOS" in data_dict and "VOL_Android" in data_dict:
+                    data_dict["VOL_App"] = {}
+                    for metric in ["Page Impressions", "Visits", "Unique Clients"]:
+                        ios_val = data_dict["VOL_iOS"].get(metric, 0)
+                        android_val = data_dict["VOL_Android"].get(metric, 0)
+                        if ios_val > 0 or android_val > 0:
+                            data_dict["VOL_App"][metric] = ios_val + android_val
+            
+            web_pi = current_data_raw.get("VOL_Web", {}).get("Page Impressions", 0)
+            if web_pi > 0:
+                print(f"   ✅ Airtable-Fallback erfolgreich: Web PI = {web_pi:,}")
+            else:
+                print("   ❌ Auch Airtable liefert keine Daten!")
+                return
+        else:
+            print("   ❌ Airtable-Fallback nicht möglich (nicht konfiguriert)")
+            print("   Prüfen Sie: AIRTABLE_API_KEY und monthly_data_utils.py")
+            return
     
     # YoY-Daten strukturieren
     yoy_data = {
